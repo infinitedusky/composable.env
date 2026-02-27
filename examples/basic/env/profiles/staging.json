@@ -1,0 +1,9 @@
+{
+  "name": "Staging",
+  "description": "Staging environment — extends production, overrides database to staging",
+  "extends": "production",
+  "components": {
+    "database": "staging",
+    "redis": "staging"
+  }
+}

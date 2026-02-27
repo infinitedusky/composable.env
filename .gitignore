@@ -1,0 +1,5 @@
+node_modules/
+dist/
+
+# composable.env personal overrides
+env/.env.local
