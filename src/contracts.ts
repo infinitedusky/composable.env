@@ -5,14 +5,42 @@ import * as path from 'path';
  * A contract declares what environment variables a service requires.
  * The builder validates and maps the composed variable pool against each contract,
  * then generates a .env file at the service's location.
+ *
+ * Two contract formats are supported:
+ *
+ * **New format (vars):** Uses `${component.KEY}` references for direct resolution.
+ *   { "vars": { "REDIS_URL": "${redis.JOB_QUEUE_URL}" }, "defaults": { ... } }
+ *
+ * **Legacy format (required/optional/secret):** Uses NAMESPACE-prefixed flat pool.
+ *   { "required": { "REDIS_URL": "REDIS_JOB_QUEUE_URL" }, ... }
  */
+export interface ServiceDevConfig {
+  command: string;       // Shell command to run (e.g., "pnpm dev")
+  cwd?: string;          // Working directory (defaults to location)
+  label?: string;        // Pane display name (defaults to uppercase name)
+}
+
 export interface ServiceContract {
   name: string;
   location?: string; // Where to write the .env file (e.g., "apps/api")
-  required: Record<string, string>; // app_var: system_var or template mapping
+
+  // New format: ${component.KEY} mappings
+  vars?: Record<string, string>;
+
+  // Legacy format: flat pool mappings
+  required?: Record<string, string>;
   optional?: Record<string, string>;
-  secret?: Record<string, string>; // Sensitive vars (included in same .env file)
+  secret?: Record<string, string>;
+
   defaults?: Record<string, string>;
+  dev?: ServiceDevConfig; // How to run this service locally (for ce start)
+}
+
+/**
+ * Detect whether a contract uses the new `vars` format or legacy `required` format.
+ */
+export function isNewFormatContract(contract: ServiceContract): boolean {
+  return contract.vars !== undefined;
 }
 
 export class ContractManager {
@@ -27,35 +55,37 @@ export class ContractManager {
     await this.loadContracts();
   }
 
+  /**
+   * Check if any loaded contract uses the new vars format.
+   */
+  hasNewFormatContracts(): boolean {
+    for (const contract of this.contracts.values()) {
+      if (isNewFormatContract(contract)) return true;
+    }
+    return false;
+  }
+
   private async loadContracts(): Promise<void> {
     if (!fs.existsSync(this.contractsDir)) {
-      // No contracts directory — contracts are optional
       return;
     }
 
-    const files = fs
-      .readdirSync(this.contractsDir)
-      .filter(f => f.endsWith('.contract.ts') || f.endsWith('.contract.js'));
+    const files = fs.readdirSync(this.contractsDir);
 
-    for (const file of files) {
+    for (const file of files.filter(f => f.endsWith('.contract.json'))) {
       try {
         const filePath = path.join(this.contractsDir, file);
-        const serviceName = file.replace(/\.contract\.(ts|js)$/, '');
+        const serviceName = file.replace(/\.contract\.json$/, '');
+        const contract: ServiceContract = JSON.parse(
+          fs.readFileSync(filePath, 'utf8')
+        );
+        this.contracts.set(serviceName, contract);
 
-        const module = await import(filePath);
-        // Expects export named: PascalCaseContract (e.g., ApiContract, DatabaseContract)
-        const pascalCaseName = serviceName
-          .split('-')
-          .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-          .join('');
-        const exportName = `${pascalCaseName}Contract`;
-        const contract = module[exportName];
-
-        if (contract) {
-          this.contracts.set(serviceName, contract);
-        } else {
+        // Log deprecation warning for legacy contracts
+        if (!isNewFormatContract(contract) && contract.required) {
           console.warn(
-            `Contract file ${file} does not export '${exportName}'. Skipping.`
+            `⚠️  Contract '${serviceName}' uses legacy format (required/optional/secret). ` +
+            `Migrate to 'vars' format with: ce migrate`
           );
         }
       } catch (err: unknown) {
@@ -65,10 +95,153 @@ export class ContractManager {
         );
       }
     }
+
+    for (const file of files.filter(f => f.endsWith('.contract.ts') || f.endsWith('.contract.js'))) {
+      try {
+        const filePath = path.join(this.contractsDir, file);
+        const serviceName = file.replace(/\.contract\.(ts|js)$/, '');
+
+        if (this.contracts.has(serviceName)) continue;
+
+        const module = await import(filePath);
+        const pascalCaseName = serviceName
+          .split('-')
+          .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+          .join('');
+        const exportName = `${pascalCaseName}Contract`;
+        const contract = module[exportName] || module.default;
+
+        if (contract) {
+          this.contracts.set(serviceName, contract);
+        } else {
+          console.warn(
+            `Contract file ${file} does not export '${exportName}'. Skipping.`
+          );
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Unknown file extension') && file.endsWith('.ts')) {
+          console.warn(
+            `Cannot load ${file} — Node.js cannot import .ts files directly.\n` +
+            `  Use .contract.json instead, or run with tsx/jiti.`
+          );
+        } else {
+          console.warn(`Failed to load contract ${file}:`, msg);
+        }
+      }
+    }
+  }
+
+  // ─── New format: vars-based validation and mapping ────────────────────────
+
+  /**
+   * Validate a new-format contract against the component pool.
+   * Component pool is Map<componentName, Record<key, value>>.
+   */
+  validateVarsContract(
+    serviceName: string,
+    componentPool: Map<string, Record<string, string>>
+  ): { valid: boolean; missing: string[]; warnings: string[] } {
+    const contract = this.contracts.get(serviceName);
+    if (!contract || !contract.vars) {
+      return { valid: true, missing: [], warnings: [] };
+    }
+
+    const missing: string[] = [];
+    const warnings: string[] = [];
+
+    for (const [appVar, ref] of Object.entries(contract.vars)) {
+      const resolved = this.resolveComponentRef(ref, componentPool);
+      if (resolved === undefined) {
+        // If it's in defaults, it's optional
+        if (contract.defaults?.[appVar] !== undefined) {
+          warnings.push(`${ref} not resolved, using default for ${appVar}: ${contract.defaults[appVar]}`);
+        } else {
+          missing.push(`${ref} (needed for ${appVar})`);
+        }
+      }
+    }
+
+    return { valid: missing.length === 0, missing, warnings };
   }
 
   /**
+   * Map a new-format contract's vars to resolved values using the component pool.
+   */
+  mapVarsContract(
+    serviceName: string,
+    componentPool: Map<string, Record<string, string>>
+  ): Record<string, string> {
+    const contract = this.contracts.get(serviceName);
+    if (!contract || !contract.vars) return {};
+
+    const serviceVars: Record<string, string> = {};
+
+    for (const [appVar, ref] of Object.entries(contract.vars)) {
+      const value = this.resolveComponentRef(ref, componentPool);
+      if (value !== undefined) {
+        serviceVars[appVar] = value;
+      } else if (contract.defaults?.[appVar] !== undefined) {
+        serviceVars[appVar] = contract.defaults[appVar];
+      }
+    }
+
+    // Apply remaining defaults not in vars
+    if (contract.defaults) {
+      for (const [appVar, defaultValue] of Object.entries(contract.defaults)) {
+        if (serviceVars[appVar] === undefined) {
+          serviceVars[appVar] = defaultValue;
+        }
+      }
+    }
+
+    return serviceVars;
+  }
+
+  /**
+   * Resolve a ${component.KEY} reference (or template with multiple refs)
+   * against the component pool.
+   *
+   * Examples:
+   *   "${redis.JOB_QUEUE_URL}" → looks up redis component, key JOB_QUEUE_URL
+   *   "${secrets.REDIS_URL}" → looks up secrets namespace
+   *   "postgresql://${database.USER}:${secrets.DB_PASSWORD}@${database.HOST}:5432/${database.NAME}"
+   */
+  private resolveComponentRef(
+    ref: string,
+    componentPool: Map<string, Record<string, string>>
+  ): string | undefined {
+    if (!/\$\{([^}]+)\}/.test(ref)) {
+      // Plain string value (no references) — return as-is
+      return ref;
+    }
+
+    const resolved = ref.replace(/\$\{([^}]+)\}/g, (match, qualifiedKey: string) => {
+      const dotIdx = qualifiedKey.indexOf('.');
+      if (dotIdx === -1) {
+        // Not a component.KEY reference — leave unresolved
+        return match;
+      }
+
+      const componentName = qualifiedKey.slice(0, dotIdx);
+      const key = qualifiedKey.slice(dotIdx + 1);
+      const component = componentPool.get(componentName);
+      if (component && key in component) {
+        return component[key];
+      }
+
+      return match; // Leave unresolved
+    });
+
+    // Only return if fully resolved (no remaining ${...})
+    return /\$\{([^}]+)\}/.test(resolved) ? undefined : resolved;
+  }
+
+  // ─── Legacy format: flat pool validation and mapping ──────────────────────
+
+  /**
    * Validate that all required variables for a service are present in the pool.
+   * Legacy format only.
    */
   validateContract(
     serviceName: string,
@@ -83,13 +256,21 @@ export class ContractManager {
       };
     }
 
+    // Route to new validation if contract uses vars format
+    if (isNewFormatContract(contract)) {
+      // Caller should use validateVarsContract instead — this is a fallback
+      return { valid: true, missing: [], warnings: [] };
+    }
+
     const missing: string[] = [];
     const warnings: string[] = [];
 
-    for (const [appVar, systemVar] of Object.entries(contract.required)) {
-      const resolved = this.resolveMapping(systemVar, systemVars);
-      if (resolved === undefined) {
-        missing.push(`${systemVar} (needed for ${appVar})`);
+    if (contract.required) {
+      for (const [appVar, systemVar] of Object.entries(contract.required)) {
+        const resolved = this.resolveMapping(systemVar, systemVars);
+        if (resolved === undefined) {
+          missing.push(`${systemVar} (needed for ${appVar})`);
+        }
       }
     }
 
@@ -118,6 +299,7 @@ export class ContractManager {
   /**
    * Map the resolved variable pool to a service's own variable names.
    * Supports direct mapping and template strings: "${HOST}:${PORT}"
+   * Legacy format only.
    */
   mapContractVariables(
     serviceName: string,
@@ -128,9 +310,11 @@ export class ContractManager {
 
     const serviceVars: Record<string, string> = {};
 
-    for (const [appVar, systemVar] of Object.entries(contract.required)) {
-      const value = this.resolveMapping(systemVar, systemVars);
-      if (value !== undefined) serviceVars[appVar] = value;
+    if (contract.required) {
+      for (const [appVar, systemVar] of Object.entries(contract.required)) {
+        const value = this.resolveMapping(systemVar, systemVars);
+        if (value !== undefined) serviceVars[appVar] = value;
+      }
     }
 
     if (contract.optional) {
@@ -186,7 +370,6 @@ export class ContractManager {
         const value = this.resolveVariable(varName, systemVars);
         return value !== undefined ? value : match;
       });
-      // Only return if fully resolved
       return /\$\{([^}]+)\}/.test(resolved) ? undefined : resolved;
     }
     return systemVars[mapping];

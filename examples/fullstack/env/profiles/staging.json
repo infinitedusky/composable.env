@@ -1,0 +1,5 @@
+{
+  "name": "Staging",
+  "description": "Staging environment — extends production with staging-specific overrides",
+  "extends": "production"
+}

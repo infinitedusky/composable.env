@@ -1,0 +1,19 @@
+{
+  "name": "api",
+  "location": "apps/api",
+  "vars": {
+    "DATABASE_URL": "${database.URL}",
+    "REDIS_URL": "${redis.URL}",
+    "JWT_SECRET": "${auth.JWT_SECRET}",
+    "LOG_LEVEL": "${LOG_LEVEL}",
+    "CORS_ORIGIN": "${CORS_ORIGIN}"
+  },
+  "defaults": {
+    "LOG_LEVEL": "info",
+    "CORS_ORIGIN": "http://localhost:3000"
+  },
+  "dev": {
+    "command": "pnpm dev",
+    "label": "API Server"
+  }
+}

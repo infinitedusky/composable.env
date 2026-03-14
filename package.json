@@ -1,15 +1,28 @@
 {
   "name": "composable.env",
-  "version": "0.1.0",
+  "version": "0.8.1",
   "description": "Composable environment management: build .env files for every service from reusable components, profiles, and contracts.",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./vault": {
+      "types": "./dist/src/vault.d.ts",
+      "import": "./dist/src/vault.js"
+    }
+  },
   "bin": {
+    "ce": "dist/cli/index.js",
     "cenv": "dist/cli/index.js"
   },
   "files": [
-    "dist/"
+    "dist/",
+    "examples/",
+    "skills/"
   ],
   "scripts": {
     "build": "tsc",
@@ -40,9 +53,16 @@
   "dependencies": {
     "chalk": "^5.3.0",
     "commander": "^11.0.0",
+    "dotenv": "^16.6.1",
     "ini": "^4.1.1",
     "yaml": "^2.3.4",
     "zod": "^3.22.4"
+  },
+  "optionalDependencies": {
+    "@noble/curves": "^1.9.7",
+    "@scure/base": "^1.2.6",
+    "age-encryption": "^0.3.0",
+    "sops-age": "^4.0.2"
   },
   "devDependencies": {
     "@types/ini": "^4.0.0",

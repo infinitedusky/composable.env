@@ -1,8 +1,0 @@
-{
-  "name": "Production",
-  "description": "Production environment",
-  "components": {
-    "database": "production",
-    "redis": "production"
-  }
-}

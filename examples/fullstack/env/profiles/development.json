@@ -1,0 +1,7 @@
+{
+  "name": "Development",
+  "description": "Local development — overrides redis DB for isolation",
+  "components": {
+    "redis": ["default", "development"]
+  }
+}
