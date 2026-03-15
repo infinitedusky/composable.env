@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.claude/
 
 # composable.env personal overrides
 env/.env.local
