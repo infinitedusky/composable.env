@@ -55,11 +55,24 @@ secrets pool: .env.secrets.shared (decrypt CENV_ENC[...]) + .env.secrets.local
 
 Contracts with `required`/`optional`/`secret` fields (v0.5.x format) are auto-detected and still work. The builder checks `isNewFormatContract()` (presence of `vars` field) to route to new or legacy resolution paths. Components with `NAMESPACE=` directives still produce prefixed keys in legacy mode.
 
+### ce.json — project config
+
+Optional root config file. `ce init` scaffolds it. All fields have defaults — absence changes nothing.
+
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `envDir` | `"env"` | Path to env directory (relative to project root) |
+| `defaultProfile` | `"default"` | Profile when no `--profile` flag or `CE_PROFILE` set |
+| `scripts` | — | Script generation config (managed by `ce scripts`) |
+
+Profile resolution: `--profile` > `CE_PROFILE` env var > `ce.json defaultProfile` > `"default"`
+
 ## Code structure
 
 ```
 src/
   index.ts          # Public API exports
+  config.ts         # loadConfig/saveConfig — ce.json loader
   builder.ts        # EnvironmentBuilder — core build logic
   contracts.ts      # ContractManager — validation + variable mapping
   types.ts          # Zod schemas + TypeScript types

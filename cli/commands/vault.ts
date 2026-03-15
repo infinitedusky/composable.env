@@ -3,7 +3,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { hasMarkerBlock, replaceMarkerBlock, wrapWithMarkers } from '../../src/index.js';
+import { hasMarkerBlock, replaceMarkerBlock, wrapWithMarkers, loadConfig } from '../../src/index.js';
 
 import type { Vault as VaultType } from '../../src/vault.js';
 
@@ -23,7 +23,8 @@ async function loadVault(): Promise<typeof import('../../src/vault.js')> {
 
 async function createVault(cwd: string): Promise<InstanceType<typeof VaultType>> {
   const { Vault } = await loadVault();
-  return new Vault(cwd);
+  const config = loadConfig(cwd);
+  return new Vault(cwd, config.envDir);
 }
 
 export function registerVaultCommand(program: Command): void {

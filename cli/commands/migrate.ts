@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as ini from 'ini';
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { loadConfig } from '../../src/index.js';
 
 interface LegacyContract {
   name: string;
@@ -28,10 +29,11 @@ export function registerMigrateCommand(program: Command): void {
     .action(async (options: { dryRun?: boolean }) => {
       const cwd = process.cwd();
       const dryRun = options.dryRun ?? false;
-      const envDir = path.join(cwd, 'env');
+      const config = loadConfig(cwd);
+      const envDir = path.join(cwd, config.envDir);
 
       if (!fs.existsSync(envDir)) {
-        console.error(chalk.red('\u274c No env/ directory found'));
+        console.error(chalk.red(`\u274c No ${config.envDir}/ directory found`));
         process.exit(1);
       }
 

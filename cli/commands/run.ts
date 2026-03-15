@@ -4,7 +4,8 @@ import { spawn } from 'child_process';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
-import { EnvironmentBuilder } from '../../src/index.js';
+import { EnvironmentBuilder, loadConfig } from '../../src/index.js';
+import type { CeConfig } from '../../src/index.js';
 
 /**
  * Resolve the profile name from multiple sources.
@@ -13,12 +14,13 @@ import { EnvironmentBuilder } from '../../src/index.js';
  *  1. Explicit --profile <name> (before --)
  *  2. Trailing positional arg matching a known profile (after --, stripped)
  *  3. CE_PROFILE env var
- *  4. "default"
+ *  4. ce.json defaultProfile
  */
 function resolveProfile(
   explicit: string | true | undefined,
   commandArgs: string[],
   cwd: string,
+  config: CeConfig,
 ): { profile: string; forwardArgs: string[] } {
   // 1. Explicit --profile <name>
   if (typeof explicit === 'string') {
@@ -27,7 +29,7 @@ function resolveProfile(
 
   // 2. Scan trailing args for a known profile name (last match wins)
   if (commandArgs.length > 0) {
-    const builder = new EnvironmentBuilder(cwd, '');
+    const builder = new EnvironmentBuilder(cwd, '', undefined, config.envDir);
     const knownProfiles = new Set(builder.listProfiles().map(p => p.name));
 
     const lastArg = commandArgs[commandArgs.length - 1];
@@ -45,8 +47,8 @@ function resolveProfile(
     return { profile: envProfile, forwardArgs: commandArgs };
   }
 
-  // 4. Fall back to "default"
-  return { profile: 'default', forwardArgs: commandArgs };
+  // 4. Fall back to ce.json defaultProfile
+  return { profile: config.defaultProfile, forwardArgs: commandArgs };
 }
 
 /**
@@ -72,7 +74,8 @@ export function registerRunCommand(program: Command): void {
     .passThroughOptions()
     .action(async (commandArgs: string[], options: { profile: string | true | undefined; build: boolean }) => {
       const cwd = process.cwd();
-      const { profile, forwardArgs } = resolveProfile(options.profile, commandArgs, cwd);
+      const config = loadConfig(cwd);
+      const { profile, forwardArgs } = resolveProfile(options.profile, commandArgs, cwd, config);
 
       if (forwardArgs.length === 0) {
         console.error(chalk.red('\u274c No command specified after --'));
@@ -91,7 +94,7 @@ export function registerRunCommand(program: Command): void {
         }
 
         console.log(chalk.blue(`Building .env.${profile}...`));
-        const builder = new EnvironmentBuilder(cwd, '', profile);
+        const builder = new EnvironmentBuilder(cwd, '', profile, config.envDir);
         const result = await builder.buildFromProfile(profile);
 
         if (!result.success) {

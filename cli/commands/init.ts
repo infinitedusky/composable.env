@@ -7,6 +7,8 @@ import {
   wrapWithMarkers,
   hasMarkerBlock,
   replaceMarkerBlock,
+  loadConfig,
+  saveConfig,
 } from '../../src/index.js';
 
 export function registerInitCommand(program: Command): void {
@@ -14,15 +16,33 @@ export function registerInitCommand(program: Command): void {
     .command('init')
     .description('Scaffold a new composable.env directory structure')
     .option('--examples', 'Include example files for all parts of the system')
+    .option('--env-dir <path>', 'Custom env directory path (default: "env")')
     .action(async (options) => {
       const cwd = process.cwd();
       const registry = new ManagedJsonRegistry(cwd);
 
+      // Scaffold or load ce.json
+      const ceJsonPath = path.join(cwd, 'ce.json');
+      if (!fs.existsSync(ceJsonPath)) {
+        const initConfig: Record<string, string> = {
+          envDir: options.envDir || 'env',
+          defaultProfile: 'default',
+        };
+        saveConfig(cwd, initConfig);
+        console.log(chalk.green('  created ce.json'));
+      } else if (options.envDir) {
+        saveConfig(cwd, { envDir: options.envDir });
+        console.log(chalk.green('  updated ce.json envDir'));
+      }
+
+      const config = loadConfig(cwd);
+      const envDir = config.envDir;
+
       const dirs = [
-        'env/components',
-        'env/profiles',
-        'env/contracts',
-        'env/execution',
+        `${envDir}/components`,
+        `${envDir}/profiles`,
+        `${envDir}/contracts`,
+        `${envDir}/execution`,
       ];
 
       for (const dir of dirs) {
@@ -34,7 +54,7 @@ export function registerInitCommand(program: Command): void {
       }
 
       // Scaffold .env.secrets.shared (team secrets, encrypted via vault)
-      const secretsSharedPath = path.join(cwd, 'env/.env.secrets.shared');
+      const secretsSharedPath = path.join(cwd, envDir, '.env.secrets.shared');
       if (!fs.existsSync(secretsSharedPath)) {
         fs.writeFileSync(
           secretsSharedPath,
@@ -42,37 +62,37 @@ export function registerInitCommand(program: Command): void {
             '# Set secrets with: ce vault set <KEY> <VALUE>\n' +
             '# Values stored as CENV_ENC[...] are encrypted at rest\n'
         );
-        console.log(chalk.green('  created env/.env.secrets.shared'));
+        console.log(chalk.green(`  created ${envDir}/.env.secrets.shared`));
       }
 
       // Scaffold .env.secrets.local (personal secret overrides, gitignored)
-      const secretsLocalPath = path.join(cwd, 'env/.env.secrets.local');
+      const secretsLocalPath = path.join(cwd, envDir, '.env.secrets.local');
       if (!fs.existsSync(secretsLocalPath)) {
         fs.writeFileSync(
           secretsLocalPath,
           '# Personal secret overrides — DO NOT commit (gitignored)\n' +
             '# Override team secrets for local development\n'
         );
-        console.log(chalk.green('  created env/.env.secrets.local'));
+        console.log(chalk.green(`  created ${envDir}/.env.secrets.local`));
       }
 
       // Scaffold .env.local (personal non-secret overrides)
-      const localPath = path.join(cwd, 'env/.env.local');
+      const localPath = path.join(cwd, envDir, '.env.local');
       if (!fs.existsSync(localPath)) {
         fs.writeFileSync(
           localPath,
           '# Personal overrides — DO NOT commit this file (gitignored)\n' +
             '# Applied last, overrides everything else\n'
         );
-        console.log(chalk.green('  created env/.env.local'));
+        console.log(chalk.green(`  created ${envDir}/.env.local`));
       }
 
       // Scaffold .gitignore with markers
       const gitignorePath = path.join(cwd, '.gitignore');
       const gitignoreEntries = [
-        'env/.env.secrets.local',
-        'env/.env.local',
-        'env/execution/*.cjs',
+        `${envDir}/.env.secrets.local`,
+        `${envDir}/.env.local`,
+        `${envDir}/execution/*.cjs`,
         '# Legacy patterns',
         '.ce.*',
       ].join('\n');
@@ -115,23 +135,24 @@ export function registerInitCommand(program: Command): void {
 
       // Scaffold example files when --examples is passed
       if (options.examples) {
-        scaffoldExamples(cwd, secretsSharedPath, secretsLocalPath, localPath);
+        scaffoldExamples(cwd, envDir, secretsSharedPath, secretsLocalPath, localPath);
       }
 
       console.log('');
       console.log(chalk.blue('Next steps:'));
-      console.log('  1. Add component files to env/components/  (auto-discovered)');
-      console.log('  2. Add profiles to env/profiles/  (optional overrides)');
-      console.log('  3. Add contract files to env/contracts/  (optional)');
+      console.log(`  1. Add component files to ${envDir}/components/  (auto-discovered)`);
+      console.log(`  2. Add profiles to ${envDir}/profiles/  (optional overrides)`);
+      console.log(`  3. Add contract files to ${envDir}/contracts/  (optional)`);
       console.log('  4. Set up vault for secrets: ce vault init');
       console.log('  5. Add secrets: ce vault set <KEY> <VALUE>');
-      console.log('  6. Add local overrides to env/.env.local  (gitignored)');
+      console.log(`  6. Add local overrides to ${envDir}/.env.local  (gitignored)`);
       console.log('  7. Run: ce build --profile <name>');
     });
 }
 
 function scaffoldExamples(
   cwd: string,
+  envDir: string,
   secretsSharedPath: string,
   secretsLocalPath: string,
   localPath: string
@@ -193,7 +214,7 @@ function scaffoldExamples(
   };
 
   // Scaffold .recipients example
-  const recipientsPath = path.join(cwd, 'env/.recipients');
+  const recipientsPath = path.join(cwd, envDir, '.recipients');
   if (!fs.existsSync(recipientsPath)) {
     fs.writeFileSync(
       recipientsPath,
@@ -208,7 +229,7 @@ function scaffoldExamples(
         '#   ssh-ed25519 AAAA... (SSH ed25519 public key)\n' +
         '#\n'
     );
-    console.log(chalk.green('  created env/.recipients'));
+    console.log(chalk.green(`  created ${envDir}/.recipients`));
   }
 
   const exampleSecretsShared =
@@ -236,34 +257,34 @@ function scaffoldExamples(
 
   // Write components
   for (const [filename, content] of Object.entries(exampleComponents)) {
-    const filePath = path.join(cwd, 'env/components', filename);
+    const filePath = path.join(cwd, envDir, 'components', filename);
     if (!fs.existsSync(filePath)) {
       fs.writeFileSync(filePath, content);
-      console.log(chalk.green(`  created env/components/${filename}`));
+      console.log(chalk.green(`  created ${envDir}/components/${filename}`));
     }
   }
 
   // Write profiles
   for (const [filename, data] of Object.entries(exampleProfiles)) {
-    const filePath = path.join(cwd, 'env/profiles', filename);
+    const filePath = path.join(cwd, envDir, 'profiles', filename);
     if (!fs.existsSync(filePath)) {
       fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
-      console.log(chalk.green(`  created env/profiles/${filename}`));
+      console.log(chalk.green(`  created ${envDir}/profiles/${filename}`));
     }
   }
 
   // Write contract
-  const contractPath = path.join(cwd, 'env/contracts/api.contract.json');
+  const contractPath = path.join(cwd, envDir, 'contracts/api.contract.json');
   if (!fs.existsSync(contractPath)) {
     fs.writeFileSync(contractPath, JSON.stringify(exampleContract, null, 2) + '\n');
-    console.log(chalk.green('  created env/contracts/api.contract.json'));
+    console.log(chalk.green(`  created ${envDir}/contracts/api.contract.json`));
   }
 
   // Write secrets files
   fs.writeFileSync(secretsSharedPath, exampleSecretsShared);
-  console.log(chalk.green('  updated env/.env.secrets.shared with example values'));
+  console.log(chalk.green(`  updated ${envDir}/.env.secrets.shared with example values`));
   fs.writeFileSync(secretsLocalPath, exampleSecretsLocal);
-  console.log(chalk.green('  updated env/.env.secrets.local with example overrides'));
+  console.log(chalk.green(`  updated ${envDir}/.env.secrets.local with example overrides`));
   fs.writeFileSync(localPath, exampleLocal);
-  console.log(chalk.green('  updated env/.env.local with example overrides'));
+  console.log(chalk.green(`  updated ${envDir}/.env.local with example overrides`));
 }

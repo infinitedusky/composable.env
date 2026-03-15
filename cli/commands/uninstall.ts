@@ -2,13 +2,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { ManagedJsonRegistry, hasMarkerBlock, removeMarkerBlock } from '../../src/index.js';
+import { ManagedJsonRegistry, hasMarkerBlock, removeMarkerBlock, loadConfig } from '../../src/index.js';
 
 export function registerUninstallCommand(program: Command): void {
   program
     .command('uninstall')
     .description('Remove all composable.env managed content and generated files')
-    .option('--all', 'Also remove the env/ configuration directory')
+    .option('--all', 'Also remove the env configuration directory and ce.json')
     .option('--dry-run', 'Show what would be removed without actually removing')
     .action((options: { all?: boolean; dryRun?: boolean }) => {
       const cwd = process.cwd();
@@ -94,24 +94,25 @@ export function registerUninstallCommand(program: Command): void {
         removed.push(rel);
       }
 
-      // 4b. Remove generated ecosystem configs from env/execution/
-      const execDir = path.join(cwd, 'env', 'execution');
+      // 4b. Remove generated ecosystem configs from execution dir
+      const config = loadConfig(cwd);
+      const execDir = path.join(cwd, config.envDir, 'execution');
       if (fs.existsSync(execDir)) {
         for (const file of fs.readdirSync(execDir)) {
           if (file.endsWith('.cjs')) {
             const fullPath = path.join(execDir, file);
             if (!dryRun) fs.unlinkSync(fullPath);
-            removed.push(`env/execution/${file}`);
+            removed.push(`${config.envDir}/execution/${file}`);
           }
         }
       }
 
-      // 5. Optionally remove env/ directory
+      // 5. Optionally remove env directory
       if (options.all) {
-        const envDir = path.join(cwd, 'env');
-        if (fs.existsSync(envDir)) {
-          if (!dryRun) fs.rmSync(envDir, { recursive: true });
-          removed.push('env/ (configuration directory)');
+        const envDirPath = path.join(cwd, config.envDir);
+        if (fs.existsSync(envDirPath)) {
+          if (!dryRun) fs.rmSync(envDirPath, { recursive: true });
+          removed.push(`${config.envDir}/ (configuration directory)`);
         }
       }
 

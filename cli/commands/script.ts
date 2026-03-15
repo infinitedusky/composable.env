@@ -2,12 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { EnvironmentBuilder, ContractManager, ManagedJsonRegistry } from '../../src/index.js';
-
-interface CeScriptsConfig {
-  command: string;
-  actions: string[];
-}
+import { EnvironmentBuilder, ContractManager, ManagedJsonRegistry, loadConfig, saveConfig } from '../../src/index.js';
+import type { CeScriptsConfig } from '../../src/index.js';
 
 export function registerScriptCommand(program: Command): void {
   program
@@ -17,22 +13,23 @@ export function registerScriptCommand(program: Command): void {
     .requiredOption('-c, --command <cmd>', 'Command to wrap (e.g., "turbo dev")')
     .action((name: string, options: { command: string }) => {
       const cwd = process.cwd();
-      const builder = new EnvironmentBuilder(cwd, '');
+      const config = loadConfig(cwd);
+      const builder = new EnvironmentBuilder(cwd, '', undefined, config.envDir);
       const profiles = builder.listProfiles();
 
       if (profiles.length === 0) {
-        console.error(chalk.red('\u274c No profiles found in env/profiles/'));
+        console.error(chalk.red(`\u274c No profiles found in ${config.envDir}/profiles/`));
         process.exit(1);
       }
 
       const scripts: Record<string, string> = {};
 
       // Default profile gets the base name
-      scripts[name] = `ce run --profile default -- ${options.command}`;
+      scripts[name] = `ce run --profile ${config.defaultProfile} -- ${options.command}`;
 
       // Every other profile gets name:profile
       for (const profile of profiles) {
-        if (profile.name === 'default') continue;
+        if (profile.name === config.defaultProfile) continue;
         scripts[`${name}:${profile.name}`] =
           `ce run --profile ${profile.name} -- ${options.command}`;
       }
@@ -49,17 +46,16 @@ export function registerScriptCommand(program: Command): void {
       const cwd = process.cwd();
       const actions = options.actions.split(',').map(a => a.trim());
 
-      // Save config to ce.json (source of truth for regeneration)
-      const config: CeScriptsConfig = {
+      // Save scripts config to ce.json
+      const scriptsConfig: CeScriptsConfig = {
         command: options.command,
         actions,
       };
-      const configPath = path.join(cwd, 'ce.json');
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-      console.log(chalk.green('  saved ce.json'));
+      saveConfig(cwd, { scripts: scriptsConfig });
+      console.log(chalk.green('  saved scripts config to ce.json'));
 
-      const scripts = await generateAppScripts(cwd, config);
-      if (!scripts) return; // errors already printed
+      const scripts = await generateAppScripts(cwd, scriptsConfig);
+      if (!scripts) return;
       writeScripts(cwd, scripts);
     });
 
@@ -68,20 +64,15 @@ export function registerScriptCommand(program: Command): void {
     .description('Regenerate package.json scripts from ce.json')
     .action(async () => {
       const cwd = process.cwd();
-      let configPath = path.join(cwd, 'ce.json');
-      if (!fs.existsSync(configPath)) {
-        const legacy = path.join(cwd, 'cenv.json');
-        if (fs.existsSync(legacy)) configPath = legacy;
-      }
+      const config = loadConfig(cwd);
 
-      if (!fs.existsSync(configPath)) {
-        console.error(chalk.red('\u274c ce.json not found'));
+      if (!config.scripts) {
+        console.error(chalk.red('\u274c No scripts config in ce.json'));
         console.error(chalk.gray('   Run "ce scripts -c <command>" first to generate it.'));
         process.exit(1);
       }
 
-      const config: CeScriptsConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      const scripts = await generateAppScripts(cwd, config);
+      const scripts = await generateAppScripts(cwd, config.scripts);
       if (!scripts) return;
       writeScripts(cwd, scripts);
     });
@@ -124,23 +115,23 @@ export function registerScriptCommand(program: Command): void {
 
 async function generateAppScripts(
   cwd: string,
-  config: CeScriptsConfig
+  scriptsConfig: CeScriptsConfig
 ): Promise<Record<string, string> | null> {
-  const builder = new EnvironmentBuilder(cwd, '');
+  const config = loadConfig(cwd);
+  const builder = new EnvironmentBuilder(cwd, '', undefined, config.envDir);
   const profiles = builder.listProfiles();
 
   if (profiles.length === 0) {
-    console.error(chalk.red('\u274c No profiles found in env/profiles/'));
+    console.error(chalk.red(`\u274c No profiles found in ${config.envDir}/profiles/`));
     process.exit(1);
   }
 
-  // Load contracts to get service names
-  const contractManager = new ContractManager(cwd);
+  const contractManager = new ContractManager(cwd, config.envDir);
   await contractManager.initialize();
   const contracts = contractManager.getContracts();
 
   if (contracts.size === 0) {
-    console.error(chalk.red('\u274c No contracts found in env/contracts/'));
+    console.error(chalk.red(`\u274c No contracts found in ${config.envDir}/contracts/`));
     console.error(chalk.gray('   Contracts provide service names for per-app scripts.'));
     process.exit(1);
   }
@@ -151,18 +142,15 @@ async function generateAppScripts(
   scripts['env:build'] = 'ce build --profile';
 
   for (const [serviceName] of contracts) {
-    for (const action of config.actions) {
-      // <action>:<app> — runs with ce env loaded, profile as positional arg
-      // e.g., dev:docs → ce run --profile -- turbo dev --filter=docs
+    for (const action of scriptsConfig.actions) {
       scripts[`${action}:${serviceName}`] =
-        `ce run --profile -- ${config.command} ${action} --filter=${serviceName}`;
+        `ce run --profile -- ${scriptsConfig.command} ${action} --filter=${serviceName}`;
     }
   }
 
-  // Base commands without app filter — no profile specified, uses resolution chain
-  // (CE_PROFILE env var → "default" fallback)
-  for (const action of config.actions) {
-    scripts[action] = `ce run -- ${config.command} ${action}`;
+  // Base commands without app filter
+  for (const action of scriptsConfig.actions) {
+    scripts[action] = `ce run -- ${scriptsConfig.command} ${action}`;
   }
 
   // env:start — launch PM2 dev environment (if any contract has a dev field)

@@ -398,7 +398,39 @@ The `--profile` flag accepts a profile name. You can also:
 
 - Pass the profile as the last positional argument: `ce run -- npm start production`
 - Set the `CE_PROFILE` environment variable (legacy: `CENV_PROFILE`)
-- Default is `"default"` if nothing is specified
+- Set `defaultProfile` in `ce.json`
+- Fall back to `"default"` if nothing is specified
+
+Priority: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultProfile` > `"default"`
+
+---
+
+## ce.json — project configuration
+
+`ce.json` is an optional config file at your project root. It lets you customize project-level settings so you don't need CLI flags on every command.
+
+```json
+{
+  "envDir": "env",
+  "defaultProfile": "local"
+}
+```
+
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `envDir` | `"env"` | Relative path to the env configuration directory |
+| `defaultProfile` | `"default"` | Profile used when no `--profile` flag or `CE_PROFILE` is set |
+| `scripts` | — | Script generation config (managed by `ce scripts`) |
+
+`ce init` scaffolds this file automatically. If `ce.json` doesn't exist, all defaults apply — fully backwards compatible.
+
+```bash
+# Use a custom env directory
+ce init --env-dir config/env
+
+# Sets defaultProfile so you don't need --profile every time
+# Just edit ce.json: { "defaultProfile": "local" }
+```
 
 ---
 
@@ -515,7 +547,7 @@ pnpm build:all production
 pnpm dev
 ```
 
-The script config is saved to `ce.json`. Regenerate anytime with `ce scripts:sync`.
+The script config is saved to `ce.json` under the `scripts` field. Regenerate anytime with `ce scripts:sync`.
 
 If you hand-write scripts in `package.json` and want `ce uninstall` to remove them later, register them:
 
@@ -594,7 +626,7 @@ your-project/
     .env.shared           # Team non-secret values (committed)
     .env.local            # Personal overrides (gitignored)
     .recipients           # Vault recipient public keys (committed)
-  ce.json                 # Script config (if using ce scripts)
+  ce.json                 # Project config (envDir, defaultProfile, scripts)
   .ce-managed.json        # Tracks what ce manages in package.json
 ```
 

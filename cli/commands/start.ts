@@ -3,7 +3,8 @@ import * as path from 'path';
 import { execSync, spawn } from 'child_process';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { EnvironmentBuilder, ContractManager } from '../../src/index.js';
+import { EnvironmentBuilder, ContractManager, loadConfig } from '../../src/index.js';
+import type { CeConfig } from '../../src/index.js';
 import { ExecutionManager } from '../../src/execution/index.js';
 
 /**
@@ -12,24 +13,25 @@ import { ExecutionManager } from '../../src/execution/index.js';
 function resolveProfile(
   explicit: string | true | undefined,
   positional: string | undefined,
-  cwd: string
+  cwd: string,
+  config: CeConfig
 ): string {
   if (typeof explicit === 'string') return explicit;
 
   if (positional) {
-    const builder = new EnvironmentBuilder(cwd, '');
+    const builder = new EnvironmentBuilder(cwd, '', undefined, config.envDir);
     const known = new Set(builder.listProfiles().map(p => p.name));
     if (known.has(positional)) return positional;
   }
 
-  return process.env.CE_PROFILE || process.env.CENV_PROFILE || 'default';
+  return process.env.CE_PROFILE || process.env.CENV_PROFILE || config.defaultProfile;
 }
 
 export function registerStartCommand(program: Command): void {
   program
     .command('start')
     .description('Build env, generate PM2 ecosystem, and launch dev environment')
-    .argument('[profile]', 'Profile name (default: "default")')
+    .argument('[profile]', 'Profile name')
     .option('-p, --profile [name]', 'Profile name (alternative to positional arg)')
     .option('--dry-run', 'Generate ecosystem file but do not launch PM2')
     .option('--no-build', 'Skip auto-build step')
@@ -42,12 +44,13 @@ export function registerStartCommand(program: Command): void {
       }
     ) => {
       const cwd = process.cwd();
-      const profile = resolveProfile(options.profile, positional, cwd);
+      const config = loadConfig(cwd);
+      const profile = resolveProfile(options.profile, positional, cwd, config);
 
       // 1. Build env files
       if (options.build) {
         console.log(chalk.blue(`Building .env.${profile}...`));
-        const builder = new EnvironmentBuilder(cwd, '', profile);
+        const builder = new EnvironmentBuilder(cwd, '', profile, config.envDir);
         const result = await builder.buildFromProfile(profile);
 
         if (!result.success) {
@@ -59,7 +62,7 @@ export function registerStartCommand(program: Command): void {
       }
 
       // 2. Load contracts
-      const contractManager = new ContractManager(cwd);
+      const contractManager = new ContractManager(cwd, config.envDir);
       await contractManager.initialize();
       const contracts = contractManager.getContracts();
 
@@ -72,7 +75,7 @@ export function registerStartCommand(program: Command): void {
       }
 
       // 3. Generate PM2 ecosystem config
-      const exec = new ExecutionManager(cwd);
+      const exec = new ExecutionManager(cwd, config.envDir);
       const ecosystemPath = await exec.buildEcosystem(profile, contracts);
 
       console.log(chalk.green(`\u2705 Ecosystem: ${path.relative(cwd, ecosystemPath)}`));

@@ -22,12 +22,12 @@ export class Vault {
   private recipientsPath: string;
   private sharedPath: string;
 
-  constructor(configDir: string) {
+  constructor(configDir: string, envDir: string = 'env') {
     this.configDir = configDir;
-    this.recipientsPath = path.join(configDir, 'env', '.recipients');
+    this.recipientsPath = path.join(configDir, envDir, '.recipients');
     // Use .env.secrets.shared if it exists, fall back to .env.shared for legacy
-    const secretsPath = path.join(configDir, 'env', '.env.secrets.shared');
-    const legacyPath = path.join(configDir, 'env', '.env.shared');
+    const secretsPath = path.join(configDir, envDir, '.env.secrets.shared');
+    const legacyPath = path.join(configDir, envDir, '.env.shared');
     this.sharedPath = fs.existsSync(secretsPath) ? secretsPath : legacyPath;
   }
 

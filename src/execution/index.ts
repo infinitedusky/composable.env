@@ -10,9 +10,9 @@ export class ExecutionManager {
   private executionDir: string;
   private projectRoot: string;
 
-  constructor(configDir: string) {
+  constructor(configDir: string, envDir: string = 'env') {
     this.projectRoot = configDir;
-    this.executionDir = path.join(configDir, 'env', 'execution');
+    this.executionDir = path.join(configDir, envDir, 'execution');
   }
 
   /**

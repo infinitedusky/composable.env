@@ -1,17 +1,19 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { EnvironmentBuilder } from '../../src/index.js';
+import { EnvironmentBuilder, loadConfig } from '../../src/index.js';
 
 export function registerListCommand(program: Command): void {
   program
     .command('list')
     .description('List available profiles')
     .action(() => {
-      const builder = new EnvironmentBuilder(process.cwd(), '');
+      const cwd = process.cwd();
+      const config = loadConfig(cwd);
+      const builder = new EnvironmentBuilder(cwd, '', undefined, config.envDir);
 
       const profiles = builder.listProfiles();
       if (profiles.length === 0) {
-        console.log(chalk.yellow('No profiles found in env/profiles/'));
+        console.log(chalk.yellow(`No profiles found in ${config.envDir}/profiles/`));
         return;
       }
 

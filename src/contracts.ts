@@ -47,8 +47,8 @@ export class ContractManager {
   private contractsDir: string;
   private contracts: Map<string, ServiceContract> = new Map();
 
-  constructor(configDir: string) {
-    this.contractsDir = path.join(configDir, 'env', 'contracts');
+  constructor(configDir: string, envDir: string = 'env') {
+    this.contractsDir = path.join(configDir, envDir, 'contracts');
   }
 
   async initialize(): Promise<void> {

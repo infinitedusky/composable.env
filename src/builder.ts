@@ -15,15 +15,18 @@ export class EnvironmentBuilder {
   private configDir: string;
   private outputPath: string;
   private contracts: ContractManager;
+  private envDir: string;
 
   constructor(
     configDir: string,
     outputPath: string,
-    private envName?: string
+    private envName?: string,
+    envDir: string = 'env'
   ) {
     this.configDir = configDir;
     this.outputPath = outputPath;
-    this.contracts = new ContractManager(configDir);
+    this.envDir = envDir;
+    this.contracts = new ContractManager(configDir, envDir);
   }
 
   async initialize(): Promise<void> {
@@ -46,7 +49,7 @@ export class EnvironmentBuilder {
         return {
           success: false,
           envPath: this.outputPath,
-          errors: ['No component files found in env/components/'],
+          errors: [`No component files found in ${this.envDir}/components/`],
         };
       }
 
@@ -280,7 +283,7 @@ export class EnvironmentBuilder {
 
   listProfiles(): { name: string; description: string }[] {
     try {
-      const profilesDir = path.join(this.configDir, 'env', 'profiles');
+      const profilesDir = path.join(this.configDir, this.envDir, 'profiles');
       return fs
         .readdirSync(profilesDir)
         .filter(f => f.endsWith('.json'))
@@ -305,7 +308,7 @@ export class EnvironmentBuilder {
    * Auto-discover all component files from env/components/*.env.
    */
   private discoverComponents(): string[] {
-    const componentsDir = path.join(this.configDir, 'env', 'components');
+    const componentsDir = path.join(this.configDir, this.envDir, 'components');
     if (!fs.existsSync(componentsDir)) return [];
     return fs.readdirSync(componentsDir)
       .filter(f => f.endsWith('.env'))
@@ -467,7 +470,7 @@ export class EnvironmentBuilder {
     const hasCenvEnc = Object.values(secrets).some(v => String(v).startsWith('CENV_ENC['));
     if (hasCenvEnc) {
       const { Vault } = await import('./vault.js');
-      const vault = new Vault(this.configDir);
+      const vault = new Vault(this.configDir, this.envDir);
       await vault.decryptPool(secrets);
     }
 
@@ -495,7 +498,7 @@ export class EnvironmentBuilder {
     const hasCenvEnc = Object.values(pool).some(v => String(v).startsWith('CENV_ENC['));
     if (hasCenvEnc) {
       const { Vault } = await import('./vault.js');
-      const vault = new Vault(this.configDir);
+      const vault = new Vault(this.configDir, this.envDir);
       await vault.decryptPool(pool);
     }
 

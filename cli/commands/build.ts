@@ -1,19 +1,20 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { EnvironmentBuilder } from '../../src/index.js';
+import { EnvironmentBuilder, loadConfig } from '../../src/index.js';
 
 export function registerBuildCommand(program: Command): void {
   program
     .command('build')
     .description('Build .env files from a profile')
-    .option('-p, --profile [name]', 'Profile name (or set CE_PROFILE env var, defaults to "default")')
+    .option('-p, --profile [name]', 'Profile name (or set CE_PROFILE env var)')
     .option('-o, --output <path>', 'Output path for single-file builds', '.env')
     .action(async (options) => {
       const configDir = process.cwd();
+      const config = loadConfig(configDir);
       const profile: string =
         typeof options.profile === 'string' ? options.profile
-        : process.env.CE_PROFILE || process.env.CENV_PROFILE || 'default';
-      const builder = new EnvironmentBuilder(configDir, options.output, profile);
+        : process.env.CE_PROFILE || process.env.CENV_PROFILE || config.defaultProfile;
+      const builder = new EnvironmentBuilder(configDir, options.output, profile, config.envDir);
 
       try {
         console.log(chalk.blue(`Building from profile: ${profile}`));

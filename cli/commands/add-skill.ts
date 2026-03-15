@@ -23,12 +23,12 @@ export function registerAddSkillCommand(program: Command): void {
     .option('--dry-run', 'Show what would be installed without writing files')
     .action(async (options: { dryRun?: boolean }) => {
       const cwd = process.cwd();
-      const targetDir = path.join(cwd, '.claude', 'commands');
-      const targetPath = path.join(targetDir, 'ce.md');
+      const targetDir = path.join(cwd, '.claude', 'skills', 'composable-env');
+      const targetPath = path.join(targetDir, 'SKILL.md');
 
       // Find the bundled skill file
       const pkgRoot = findPackageRoot();
-      const skillSource = path.join(pkgRoot, 'skills', 'ce.md');
+      const skillSource = path.join(pkgRoot, 'skills', 'SKILL.md');
 
       if (!fs.existsSync(skillSource)) {
         console.error(chalk.red('\u274c Skill file not found in composable.env package'));
@@ -41,7 +41,7 @@ export function registerAddSkillCommand(program: Command): void {
         return;
       }
 
-      // Create .claude/commands/ if it doesn't exist
+      // Create .claude/skills/composable-env/ if it doesn't exist
       if (!fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true });
       }
