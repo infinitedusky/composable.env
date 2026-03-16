@@ -78,6 +78,17 @@ export class EnvironmentBuilder {
           profileData = loaded.profileData;
           inheritanceChain = loaded.inheritanceChain;
         } else {
+          // No profile JSON — verify at least one component has a [profileName] section
+          if (!this.profileSectionExists(profileName, allComponents)) {
+            return {
+              success: false,
+              envPath: this.outputPath,
+              errors: [
+                `Profile '${profileName}' not found. No ${this.envDir}/profiles/${profileName}.json ` +
+                `and no [${profileName}] section in any component file.`,
+              ],
+            };
+          }
           profileData = {
             name: profileName,
             description: `Auto-generated from [${profileName}] sections`,
@@ -435,6 +446,28 @@ export class EnvironmentBuilder {
         errors: [`Failed to build environments: ${error}`],
       };
     }
+  }
+
+  /**
+   * Check if any component file contains a [profileName] INI section.
+   */
+  private profileSectionExists(profileName: string, components: string[]): boolean {
+    for (const component of components) {
+      const componentPath = path.join(
+        this.configDir,
+        this.envDir,
+        'components',
+        `${component}.env`
+      );
+      try {
+        const content = fs.readFileSync(componentPath, 'utf8');
+        const config = ini.parse(content) as EnvironmentConfig;
+        if (config[profileName]) return true;
+      } catch {
+        continue;
+      }
+    }
+    return false;
   }
 
   // ─── Secrets layer ────────────────────────────────────────────────────────
