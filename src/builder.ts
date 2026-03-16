@@ -10,7 +10,7 @@ import {
   DockerServiceConfig,
 } from './types.js';
 import { ContractManager, isNewFormatContract } from './contracts.js';
-import { writeDockerComposeService } from './targets/docker-compose.js';
+import { writeDockerComposeFile, type ComposeServiceEntry } from './targets/docker-compose.js';
 
 export class EnvironmentBuilder {
   private configDir: string;
@@ -406,8 +406,8 @@ export class EnvironmentBuilder {
       }
 
       // All valid — write outputs
-      // Group target contracts by file so we read/write each file once
-      const targetGroups = new Map<string, { serviceName: string; targetService: string }[]>();
+      // Collect docker-compose entries grouped by target file
+      const composeGroups = new Map<string, ComposeServiceEntry[]>();
 
       for (const [serviceName, contract] of availableContracts) {
         // A contract can have location, target, or both
@@ -433,23 +433,13 @@ export class EnvironmentBuilder {
         }
 
         if (contract.target) {
-          // Docker-compose target — group by file
+          // Docker-compose target — collect entries grouped by file
           const filePath = contract.target.file;
-          if (!targetGroups.has(filePath)) {
-            targetGroups.set(filePath, []);
+          if (!composeGroups.has(filePath)) {
+            composeGroups.set(filePath, []);
           }
-          targetGroups.get(filePath)!.push({
-            serviceName,
-            targetService: contract.target.service,
-          });
-        }
-      }
 
-      // Write docker-compose targets (one file at a time, all services)
-      for (const [filePath, services] of targetGroups) {
-        for (const { serviceName, targetService } of services) {
           let serviceVars: Record<string, string>;
-
           if (useNewFormat && componentPool) {
             serviceVars = this.contracts.mapVarsContract(serviceName, componentPool);
           } else {
@@ -457,7 +447,6 @@ export class EnvironmentBuilder {
           }
 
           // Apply defaults
-          const contract = availableContracts.get(serviceName)!;
           if (contract.defaults) {
             for (const [key, value] of Object.entries(contract.defaults)) {
               if (serviceVars[key] === undefined) {
@@ -466,11 +455,19 @@ export class EnvironmentBuilder {
             }
           }
 
-          await writeDockerComposeService(
-            filePath, targetService, serviceVars,
-            contract.target?.config, profileName
-          );
+          composeGroups.get(filePath)!.push({
+            contractName: serviceName,
+            serviceName: contract.target.service,
+            vars: serviceVars,
+            config: contract.target.config,
+          });
         }
+      }
+
+      // Write docker-compose files (one write per file, all services batched)
+      for (const [filePath, entries] of composeGroups) {
+        const result = await writeDockerComposeFile(filePath, entries, profileName);
+        warnings.push(...result.warnings);
         generatedFiles.push(filePath);
       }
 

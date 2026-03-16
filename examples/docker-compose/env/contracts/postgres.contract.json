@@ -10,6 +10,7 @@
     "POSTGRES_PASSWORD": "${database.PASSWORD}",
     "POSTGRES_DB": "${database.NAME}",
     "POSTGRES_HOST": "${database.HOST}",
-    "POSTGRES_PORT": "${database.PORT}"
+    "POSTGRES_PORT": "${database.PORT}",
+    "DATABASE_URL": "${database.URL}"
   }
 }
