@@ -1,0 +1,4 @@
+{
+  "name": "Production",
+  "description": "Production environment — all components use [production] sections"
+}

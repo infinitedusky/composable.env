@@ -1,0 +1,14 @@
+{
+  "name": "redis",
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "redis",
+    "config": {
+      "image": "redis:7-alpine",
+      "ports": ["6379:6379"],
+      "restart": "unless-stopped"
+    }
+  },
+  "vars": {}
+}

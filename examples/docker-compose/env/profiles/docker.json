@@ -1,0 +1,8 @@
+{
+  "name": "Docker",
+  "description": "Docker Compose environment — uses internal Docker networking hostnames",
+  "components": {
+    "database": ["default", "docker"],
+    "redis": ["default", "docker"]
+  }
+}

@@ -10,6 +10,7 @@ import {
   DockerServiceConfig,
 } from './types.js';
 import { ContractManager, isNewFormatContract } from './contracts.js';
+import { writeDockerComposeService } from './targets/docker-compose.js';
 
 export class EnvironmentBuilder {
   private configDir: string;
@@ -404,28 +405,73 @@ export class EnvironmentBuilder {
         };
       }
 
-      // All valid — write .env files
+      // All valid — write outputs
+      // Group target contracts by file so we read/write each file once
+      const targetGroups = new Map<string, { serviceName: string; targetService: string }[]>();
+
       for (const [serviceName, contract] of availableContracts) {
-        if (!contract.location) {
-          throw new Error(`Contract '${serviceName}' is missing required 'location' field`);
+        // A contract can have location, target, or both
+
+        if (contract.location) {
+          // Standard .env file output
+          if (!this.envName) {
+            throw new Error(
+              'Environment name required. Pass it as the third constructor argument (e.g., "production").'
+            );
+          }
+
+          const outputPath = `${contract.location}/.env.${this.envName}`;
+          const outputDir = path.dirname(outputPath);
+          if (!fs.existsSync(outputDir)) {
+            await fs.promises.mkdir(outputDir, { recursive: true });
+          }
+
+          await this.generateServiceEnvFile(
+            serviceName, resolvedPool, outputPath, profileName, componentPool
+          );
+          generatedFiles.push(outputPath);
         }
 
-        if (!this.envName) {
-          throw new Error(
-            'Environment name required. Pass it as the third constructor argument (e.g., "production").'
+        if (contract.target) {
+          // Docker-compose target — group by file
+          const filePath = contract.target.file;
+          if (!targetGroups.has(filePath)) {
+            targetGroups.set(filePath, []);
+          }
+          targetGroups.get(filePath)!.push({
+            serviceName,
+            targetService: contract.target.service,
+          });
+        }
+      }
+
+      // Write docker-compose targets (one file at a time, all services)
+      for (const [filePath, services] of targetGroups) {
+        for (const { serviceName, targetService } of services) {
+          let serviceVars: Record<string, string>;
+
+          if (useNewFormat && componentPool) {
+            serviceVars = this.contracts.mapVarsContract(serviceName, componentPool);
+          } else {
+            serviceVars = this.contracts.mapContractVariables(serviceName, resolvedPool);
+          }
+
+          // Apply defaults
+          const contract = availableContracts.get(serviceName)!;
+          if (contract.defaults) {
+            for (const [key, value] of Object.entries(contract.defaults)) {
+              if (serviceVars[key] === undefined) {
+                serviceVars[key] = value;
+              }
+            }
+          }
+
+          await writeDockerComposeService(
+            filePath, targetService, serviceVars,
+            contract.target?.config, profileName
           );
         }
-
-        const outputPath = `${contract.location}/.env.${this.envName}`;
-        const outputDir = path.dirname(outputPath);
-        if (!fs.existsSync(outputDir)) {
-          await fs.promises.mkdir(outputDir, { recursive: true });
-        }
-
-        await this.generateServiceEnvFile(
-          serviceName, resolvedPool, outputPath, profileName, componentPool
-        );
-        generatedFiles.push(outputPath);
+        generatedFiles.push(filePath);
       }
 
       if (profile.docker) {

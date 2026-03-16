@@ -1,0 +1,25 @@
+{
+  "name": "api",
+  "location": "apps/api",
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "app"
+  },
+  "vars": {
+    "API_PORT": "${api.PORT}",
+    "DATABASE_URL": "${database.URL}",
+    "REDIS_URL": "${redis.URL}",
+    "JWT_SECRET": "${secrets.JWT_SECRET}",
+    "LOG_LEVEL": "${api.LOG_LEVEL}",
+    "CORS_ORIGIN": "${api.CORS_ORIGIN}"
+  },
+  "defaults": {
+    "LOG_LEVEL": "info"
+  },
+  "dev": {
+    "command": "pnpm dev",
+    "cwd": "apps/api",
+    "label": "API"
+  }
+}

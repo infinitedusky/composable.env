@@ -61,7 +61,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
     → .env.local (personal non-secret overrides)
       → contract vars mapping: ${component.KEY} → app variable names
         → defaults for unresolved vars
-          → write .env.{profile} files per contract location
+          → write .env.{profile} per location OR update docker-compose.yml per target
 ```
 
 ## CLI commands
@@ -120,6 +120,63 @@ Profile resolution: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultPr
 - `defaults` provides fallbacks for unresolvable vars
 - `dev` defines how `ce start` runs this service via PM2
 
+## Docker Compose target
+
+The `target` field generates an entire docker-compose.yml from contracts. The compose file is a **build artifact** — fully generated, gitignored, contains resolved secrets. Contracts are the versioned source of truth.
+
+A target has two parts:
+- **`config`** — the Docker service definition (image, ports, volumes, healthchecks, etc.)
+- **`vars`** — resolved environment variables written to the `environment:` block
+
+One contract defines the container, others add vars to it:
+
+```json
+// Defines the container itself
+{
+  "name": "app-container",
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "app",
+    "config": {
+      "build": { "context": ".", "dockerfile": "Dockerfile" },
+      "ports": ["4000:4000"],
+      "depends_on": ["redis"],
+      "restart": "unless-stopped"
+    }
+  },
+  "vars": {}
+}
+```
+
+```json
+// Adds API vars to the same container
+{
+  "name": "api",
+  "location": "apps/api",
+  "target": { "type": "docker-compose", "file": "docker-compose.yml", "service": "app" },
+  "vars": {
+    "PORT": "${api.PORT}",
+    "DATABASE_URL": "${database.URL}",
+    "JWT_SECRET": "${secrets.JWT_SECRET}"
+  },
+  "dev": { "command": "pnpm dev" }
+}
+```
+
+Multiple contracts targeting the same service are **additive** — both `config` (arrays concatenated, objects merged) and `vars` (merged) accumulate. A contract can have `location`, `target`, or both:
+- `location` only → writes `.env.{profile}` (local dev)
+- `target` only → writes into docker-compose.yml (Docker only)
+- Both → writes to both (local dev + Docker from the same contract)
+
+Key points:
+- docker-compose.yml is fully generated — no template, no hand-editing
+- `config` handles everything Docker Compose supports: image, build, ports, volumes, healthchecks, deploy, networks, etc.
+- `environment:` block contains resolved secrets → file must be gitignored
+- Target vars are **runtime-only** — injected when the container starts, never baked into the Docker image
+- Contracts with only `target` (no `location`) are skipped by `ce start` PM2
+- See `examples/docker-compose/` for a full working example
+
 ## Component format
 
 ```ini
@@ -145,7 +202,8 @@ NAME=myapp
 6. **Don't keep vestigial components** — if two components define the same service's config (e.g., `partykit.env` and `game-server.env` both defining HOST for the same server), merge them. One component per logical service.
 7. **Document all secrets for onboarding** — if a secret exists only in `.env.secrets.local` with no counterpart in `.env.secrets.shared`, new developers can't build without manual setup. Every team secret should be in `.env.secrets.shared` (or the vault), with `.env.secrets.local` only for personal overrides.
 8. **Don't leave deploy-time values blank** — if a component has keys like `DIAMOND_ADDRESS=` that must be populated after a deploy, document this in the component file with a comment and consider a post-deploy script that writes to the component or vault.
-9. **Don't manually source env in Docker** — `ce start` generates a PM2 ecosystem config that reads `.env.{profile}` automatically. If your Docker entrypoint manually sources env files, replace that with `ce build && ce start` in the container.
+9. **Don't manually source env in Docker** — use a `target` contract to write vars into docker-compose.yml's `environment:` block. Don't copy composable.env into the container or source .env files in entrypoints — that risks baking secrets into image layers. The `target` approach keeps secrets at runtime only.
+10. **Don't forget to gitignore docker-compose.yml when using targets** — since `ce build` writes resolved secrets into the compose file, it must be gitignored. The contract (versioned) is the source of truth, not the compose file.
 
 ## When helping the user
 
@@ -158,3 +216,4 @@ NAME=myapp
 7. **Custom env dir**: Set `envDir` in `ce.json` if the project doesn't use the default `env/` path.
 8. **Default profile**: Set `defaultProfile` in `ce.json` so the team doesn't need `--profile` on every command.
 9. **Deciding where a value goes**: Is it secret? → `.env.secrets.shared`. Is it personal? → `.env.secrets.local` or `.env.local`. Is it neither? → directly in a component file (versioned).
+10. **Docker Compose services**: Use `target` instead of `location` in the contract. Set `type: "docker-compose"`, point `file` to the compose file, and `service` to the service name. Gitignore the compose file since it will contain resolved secrets.

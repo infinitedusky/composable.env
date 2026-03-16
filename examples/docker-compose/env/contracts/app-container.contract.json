@@ -1,0 +1,19 @@
+{
+  "name": "app-container",
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "app",
+    "config": {
+      "build": {
+        "context": ".",
+        "dockerfile": "Dockerfile"
+      },
+      "ports": ["4000:4000", "3005:3005"],
+      "depends_on": ["redis"],
+      "restart": "unless-stopped",
+      "volumes": ["./data:/app/data"]
+    }
+  },
+  "vars": {}
+}

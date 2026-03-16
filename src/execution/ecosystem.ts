@@ -22,6 +22,9 @@ export function extractApps(
   for (const [, contract] of contracts) {
     if (!contract.dev) continue;
 
+    // Target contracts (e.g., docker-compose) are container-managed, not PM2-managed
+    if (contract.target && !contract.location) continue;
+
     const cwd = contract.dev.cwd || contract.location || '.';
     const label = contract.dev.label || contract.name;
     const absoluteCwd = cwd.startsWith('/') ? cwd : path.join(projectRoot, cwd);

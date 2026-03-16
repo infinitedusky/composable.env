@@ -1,0 +1,15 @@
+{
+  "name": "postgres",
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "app"
+  },
+  "vars": {
+    "POSTGRES_USER": "${database.USER}",
+    "POSTGRES_PASSWORD": "${database.PASSWORD}",
+    "POSTGRES_DB": "${database.NAME}",
+    "POSTGRES_HOST": "${database.HOST}",
+    "POSTGRES_PORT": "${database.PORT}"
+  }
+}

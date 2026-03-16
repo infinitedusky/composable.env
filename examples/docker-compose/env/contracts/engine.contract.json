@@ -1,0 +1,14 @@
+{
+  "name": "engine",
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "app"
+  },
+  "vars": {
+    "ENGINE_PORT": "${engine.PORT}",
+    "ENCRYPTION_PASSWORD": "${secrets.ENGINE_ENCRYPTION_PW}",
+    "THIRDWEB_API_SECRET_KEY": "${secrets.THIRDWEB_API_KEY}",
+    "ADMIN_WALLET_ADDRESS": "${engine.ADMIN_WALLET_ADDRESS}"
+  }
+}

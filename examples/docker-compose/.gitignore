@@ -1,0 +1,10 @@
+# composable.env build artifacts
+docker-compose.yml
+apps/**/.env.*
+
+# Personal secrets
+env/.env.secrets.local
+env/.env.local
+
+# PM2
+env/execution/

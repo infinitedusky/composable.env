@@ -1,0 +1,15 @@
+{
+  "name": "worker",
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "app"
+  },
+  "vars": {
+    "WORKER_CONCURRENCY": "${WORKER_CONCURRENCY}",
+    "QUEUE_URL": "${redis.URL}"
+  },
+  "defaults": {
+    "WORKER_CONCURRENCY": "4"
+  }
+}

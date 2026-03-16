@@ -1,6 +1,6 @@
 export { EnvironmentBuilder } from './builder.js';
 export { ContractManager, isNewFormatContract } from './contracts.js';
-export type { ServiceContract, ServiceDevConfig } from './contracts.js';
+export type { ServiceContract, ServiceDevConfig, ContractTarget } from './contracts.js';
 export type { Components, Profile, EnvironmentConfig, BuildResult, CeConfig, CeScriptsConfig } from './types.js';
 export { loadConfig, saveConfig } from './config.js';
 export {

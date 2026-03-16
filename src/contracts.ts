@@ -20,9 +20,17 @@ export interface ServiceDevConfig {
   label?: string;        // Pane display name (defaults to uppercase name)
 }
 
+export interface ContractTarget {
+  type: 'docker-compose';    // Future: other target types
+  file: string;              // Path to file (e.g., "docker-compose.yml")
+  service: string;           // Service name within the file
+  config?: Record<string, unknown>;  // Service config (image, ports, volumes, etc.)
+}
+
 export interface ServiceContract {
   name: string;
-  location?: string; // Where to write the .env file (e.g., "apps/api")
+  location?: string;         // Where to write the .env file (e.g., "apps/api")
+  target?: ContractTarget;   // Alternative to location — write into a target file
 
   // New format: ${component.KEY} mappings
   vars?: Record<string, string>;
@@ -79,6 +87,26 @@ export class ContractManager {
         const contract: ServiceContract = JSON.parse(
           fs.readFileSync(filePath, 'utf8')
         );
+
+        // Validate: contract must have at least one output destination
+        if (!contract.location && !contract.target) {
+          throw new Error(
+            `Contract '${serviceName}' must have 'location', 'target', or both.`
+          );
+        }
+        if (contract.target) {
+          if (contract.target.type !== 'docker-compose') {
+            throw new Error(
+              `Contract '${serviceName}' has unsupported target type '${contract.target.type}'. Supported: docker-compose`
+            );
+          }
+          if (!contract.target.file || !contract.target.service) {
+            throw new Error(
+              `Contract '${serviceName}' target requires both 'file' and 'service' fields.`
+            );
+          }
+        }
+
         this.contracts.set(serviceName, contract);
 
         // Log deprecation warning for legacy contracts
