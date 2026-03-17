@@ -69,7 +69,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 | Command | Purpose |
 |---------|---------|
 | `ce init` | Scaffold env/ directory and ce.json |
-| `ce build [profile]` | Build .env files for all contracts |
+| `ce build [profile]` | Build .env files + docker-compose.yml. With `--profile X`: only `.env.X`. Without: all profiles. Compose file always includes all profiles. |
 | `ce start [profile]` | Build + launch PM2 dev environment |
 | `ce list` | Show components, profiles, contracts |
 | `ce run [profile] -- <cmd>` | Build then run a command |
@@ -172,7 +172,7 @@ Multiple contracts targeting the same service are **additive** — both `config`
 
 ### Multi-profile compose output
 
-When `ce build` detects target contracts, it builds **all profiles** into one compose file. Shared Docker config (image, ports, volumes) goes into `x-` YAML anchor blocks. Per-profile variants use `<<: *anchor` merge and Docker Compose `profiles:` arrays:
+When `ce build` detects target contracts, it builds **all profiles** (from `env/profiles/*.json` — not component sections) into one compose file. Shared Docker config (image, ports, volumes) goes into `x-` YAML anchor blocks. Per-profile variants use `<<: *anchor` merge and Docker Compose `profiles:` arrays:
 
 ```yaml
 x-app: &app-base
@@ -201,7 +201,7 @@ Switch environments without rebuilding: `docker compose --profile local up` vs `
 
 Services with identical config and environment across all profiles appear once with no `profiles:` key (always started). `onlyProfiles` on contracts controls which profiles include that contract.
 
-All `.env.{profile}` files for location contracts are also built for every profile in a single pass.
+`ce build` (no profile flag) writes `.env.{profile}` for every profile. `ce build --profile X` writes only `.env.X` but the compose file still includes all profiles.
 
 Key points:
 - docker-compose.yml is fully generated — no template, no hand-editing
