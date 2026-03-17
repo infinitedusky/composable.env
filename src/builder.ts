@@ -320,44 +320,21 @@ export class EnvironmentBuilder {
   }
 
   /**
-   * Discover all profile names from JSON files AND component [section] names.
+   * Discover all profile names from JSON files in env/profiles/.
+   * Only explicitly defined profiles — not inferred from component section names.
    */
   discoverAllProfileNames(): string[] {
-    const names = new Set<string>();
-
-    // From profile JSON files
-    for (const p of this.listProfiles()) {
-      names.add(p.name);
-    }
-
-    // From component [section] names (excluding 'default')
-    const components = this.discoverComponents();
-    for (const component of components) {
-      const componentPath = path.join(this.configDir, this.envDir, 'components', `${component}.env`);
-      try {
-        const content = fs.readFileSync(componentPath, 'utf8');
-        const config = ini.parse(content) as EnvironmentConfig;
-        for (const section of Object.keys(config)) {
-          if (section !== 'default' && typeof config[section] === 'object') {
-            names.add(section);
-          }
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    return [...names].sort();
+    return this.listProfiles().map(p => p.name).sort();
   }
 
   /**
-   * Build ALL profiles at once.
+   * Build profiles and generate multi-profile compose output.
    *
-   * - For each profile: resolves vars and writes .env.{profile} for location contracts
-   * - For target contracts: collects multi-profile entries and writes one compose file
-   *   with YAML anchors for shared config and Docker Compose profiles: for per-env variants
+   * @param envProfile — if set, only write .env.{profile} for this one profile.
+   *                     If omitted, write .env files for ALL profiles.
+   *                     The compose file always includes all profiles regardless.
    */
-  async buildAllProfiles(): Promise<BuildResult> {
+  async buildAllProfiles(envProfile?: string): Promise<BuildResult> {
     await this.initialize();
 
     const allComponents = this.discoverComponents();
@@ -453,8 +430,11 @@ export class EnvironmentBuilder {
       if (errors.length > 0) continue; // validate all profiles before failing
 
       // Write .env.{profile} for location contracts
+      // If envProfile is set, only write for that specific profile
+      const shouldWriteEnv = !envProfile || envProfile === profileName;
+
       for (const [serviceName, contract] of availableContracts) {
-        if (contract.location) {
+        if (contract.location && shouldWriteEnv) {
           const outputPath = `${contract.location}/.env.${profileName}`;
           const outputDir = path.dirname(outputPath);
           if (!fs.existsSync(outputDir)) {

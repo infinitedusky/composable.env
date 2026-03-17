@@ -25,9 +25,14 @@ export function registerBuildCommand(program: Command): void {
         let result;
         if (hasTargets) {
           const allProfiles = builder.discoverAllProfileNames();
-          console.log(chalk.blue(`Building all profiles: ${allProfiles.join(', ')}`));
-          console.log(chalk.gray(`   (target contracts detected — multi-profile compose output)`));
-          result = await builder.buildAllProfiles();
+          const explicitProfile = typeof options.profile === 'string' ? options.profile : undefined;
+          if (explicitProfile) {
+            console.log(chalk.blue(`Building .env for profile: ${explicitProfile}`));
+            console.log(chalk.gray(`   Compose file includes all profiles: ${allProfiles.join(', ')}`));
+          } else {
+            console.log(chalk.blue(`Building all profiles: ${allProfiles.join(', ')}`));
+          }
+          result = await builder.buildAllProfiles(explicitProfile);
         } else {
           console.log(chalk.blue(`Building from profile: ${profile}`));
           result = await builder.buildFromProfile(profile);
