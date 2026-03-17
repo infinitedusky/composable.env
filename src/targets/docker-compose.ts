@@ -153,6 +153,31 @@ export async function writeMultiProfileComposeFile(
     }
   }
 
+  // ── Rewrite hostnames: profiled service names in vars get profile suffix ──
+  // e.g., HOST=game-server → game-server-local when building local profile
+  // Only affects target output vars, not .env files.
+  // Collect all compose service names for matching
+  const allServiceNames = new Set(serviceData.keys());
+
+  for (const [, profileMap] of serviceData) {
+    for (const [profileName, data] of profileMap) {
+      for (const [key, value] of Object.entries(data.vars)) {
+        let rewritten = value;
+        for (const svcName of profiledServices) {
+          if (!allServiceNames.has(svcName)) continue;
+          // Replace exact match or embedded in URLs (word boundary aware)
+          // Use a regex that matches the service name as a standalone hostname
+          // e.g., "game-server" in "postgresql://user@game-server:5432/db"
+          const pattern = new RegExp(`(?<=[/@])${escapeRegex(svcName)}(?=[:/?#]|$)|^${escapeRegex(svcName)}$`, 'g');
+          rewritten = rewritten.replace(pattern, `${svcName}-${profileName}`);
+        }
+        if (rewritten !== value) {
+          data.vars[key] = rewritten;
+        }
+      }
+    }
+  }
+
   // ── Second pass: emit x- anchors FIRST (must appear before aliases) ──
   // Pre-compute shared configs and depends_on for profiled services
   const sharedConfigs = new Map<string, Record<string, unknown>>();
@@ -507,6 +532,10 @@ function getPerProfileConfig(
     }
   }
   return perProfile;
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function sortedEntries(obj: Record<string, string>): [string, string][] {
