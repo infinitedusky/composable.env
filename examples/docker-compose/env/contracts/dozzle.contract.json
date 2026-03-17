@@ -1,0 +1,16 @@
+{
+  "name": "dozzle",
+  "onlyProfiles": ["docker"],
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "dozzle",
+    "config": {
+      "image": "amir20/dozzle:latest",
+      "ports": ["8080:8080"],
+      "volumes": ["/var/run/docker.sock:/var/run/docker.sock:ro"],
+      "restart": "unless-stopped"
+    }
+  },
+  "vars": {}
+}

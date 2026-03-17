@@ -32,6 +32,10 @@ export interface ServiceContract {
   location?: string;         // Where to write the .env file (e.g., "apps/api")
   target?: ContractTarget;   // Alternative to location — write into a target file
 
+  // Profile filtering: only include this contract when building these ce profiles.
+  // If omitted, the contract is included for all profiles.
+  onlyProfiles?: string[];
+
   // New format: ${component.KEY} mappings
   vars?: Record<string, string>;
 

@@ -337,7 +337,22 @@ export class EnvironmentBuilder {
     const generatedFiles: string[] = [];
 
     try {
-      const availableContracts = this.contracts.getContracts();
+      const allContracts = this.contracts.getContracts();
+      const currentProfile = profileName || 'default';
+
+      // Filter contracts by onlyProfiles — skip contracts that don't apply to this profile
+      const availableContracts = new Map(
+        [...allContracts].filter(([, contract]) => {
+          if (!contract.onlyProfiles || contract.onlyProfiles.length === 0) return true;
+          return contract.onlyProfiles.includes(currentProfile);
+        })
+      );
+
+      const skippedCount = allContracts.size - availableContracts.size;
+      if (skippedCount > 0) {
+        warnings.push(`Skipped ${skippedCount} contract(s) not matching profile '${currentProfile}'`);
+      }
+
       const useNewFormat = this.contracts.hasNewFormatContracts();
 
       let componentPool: Map<string, Record<string, string>> | undefined;

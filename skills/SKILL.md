@@ -119,6 +119,7 @@ Profile resolution: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultPr
 - Bare `${KEY}` resolves from shared/local values
 - `defaults` provides fallbacks for unresolvable vars
 - `dev` defines how `ce start` runs this service via PM2
+- `onlyProfiles` — optional array of ce profile names. If set, the contract is only included when building one of those profiles. Useful for dev-only services (log aggregators, debug tools) that shouldn't exist in production builds
 
 ## Docker Compose target
 
