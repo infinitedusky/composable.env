@@ -124,13 +124,21 @@ export async function writeMultiProfileComposeFile(
   // Collect all services (flat) for volume/network detection later
   const allServicesFlat: Record<string, Record<string, unknown>> = {};
 
-  // Process each target service
+  // ── First pass: determine which services are profiled (varying env) ──
+  const profiledServices = new Set<string>();
   for (const [serviceName, profileMap] of serviceData) {
     const profiles = [...profileMap.keys()];
-    const isMultiProfile = profiles.length > 1;
-    const hasVaryingEnv = isMultiProfile && !allProfilesIdentical(profileMap);
+    if (profiles.length > 1 && !allProfilesIdentical(profileMap)) {
+      profiledServices.add(serviceName);
+    }
+  }
 
-    if (!hasVaryingEnv) {
+  // ── Second pass: emit services, rewriting depends_on for profiled refs ──
+  for (const [serviceName, profileMap] of serviceData) {
+    const profiles = [...profileMap.keys()];
+    const isProfiled = profiledServices.has(serviceName);
+
+    if (!isProfiled) {
       // Single profile or identical across profiles — emit once, no profiles: key
       const firstProfile = profiles[0];
       const data = profileMap.get(firstProfile)!;
@@ -145,8 +153,15 @@ export async function writeMultiProfileComposeFile(
       addToServices(docContents, serviceName, serviceNode);
     } else {
       // Varying env across profiles — use x- anchor for shared config
-      // Extract shared config (identical across all profiles)
       const sharedConfig = extractSharedConfig(profileMap);
+
+      // Remove depends_on from shared config — it needs per-profile rewriting
+      const sharedHasDependsOn = 'depends_on' in sharedConfig;
+      const sharedDependsOn = sharedConfig.depends_on;
+      if (sharedHasDependsOn) {
+        delete sharedConfig.depends_on;
+      }
+
       const anchorName = `${serviceName}-base`;
 
       // Create the x- extension node with anchor
@@ -162,7 +177,6 @@ export async function writeMultiProfileComposeFile(
         const data = profileMap.get(profileName)!;
         const variantName = `${serviceName}-${profileName}`;
 
-        // Build the variant as a YAMLMap
         const variantNode = new YAMLMap();
 
         // Add <<: *anchor merge if we have shared config
@@ -176,8 +190,16 @@ export async function writeMultiProfileComposeFile(
         // Add profiles: [profileName]
         variantNode.add(doc.createPair('profiles', doc.createNode([profileName])));
 
-        // Add per-profile config that differs from shared
+        // Add depends_on with profiled service name rewriting
+        const rawDependsOn = data.config.depends_on ?? sharedDependsOn;
+        if (rawDependsOn) {
+          const rewritten = rewriteDependsOn(rawDependsOn, profiledServices, profileName);
+          variantNode.add(doc.createPair('depends_on', doc.createNode(rewritten)));
+        }
+
+        // Add per-profile config that differs from shared (excluding depends_on, already handled)
         const perProfileConfig = getPerProfileConfig(data.config, sharedConfig);
+        delete perProfileConfig.depends_on;
         for (const [key, value] of Object.entries(perProfileConfig)) {
           variantNode.add(doc.createPair(key, doc.createNode(value)));
         }
@@ -355,6 +377,35 @@ function addToServices(docContents: YAMLMap, name: string, node: unknown): void 
 }
 
 /**
+ * Rewrite depends_on references: if a dependency is a profiled service,
+ * replace it with the profile-suffixed variant name.
+ *
+ * Supports both array format: ["redis", "numero"]
+ * and object format: { "numero": { "condition": "service_healthy" } }
+ */
+function rewriteDependsOn(
+  dependsOn: unknown,
+  profiledServices: Set<string>,
+  profileName: string
+): unknown {
+  if (Array.isArray(dependsOn)) {
+    return dependsOn.map(dep => {
+      const name = String(dep);
+      return profiledServices.has(name) ? `${name}-${profileName}` : name;
+    });
+  }
+  if (dependsOn && typeof dependsOn === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(dependsOn as Record<string, unknown>)) {
+      const key = profiledServices.has(name) ? `${name}-${profileName}` : name;
+      result[key] = value;
+    }
+    return result;
+  }
+  return dependsOn;
+}
+
+/**
  * Check if all profiles for a service produce identical environment vars.
  */
 function allProfilesIdentical(
@@ -426,7 +477,7 @@ function detectNamedVolumes(services: Record<string, Record<string, unknown>>): 
       const colonIdx = str.indexOf(':');
       if (colonIdx === -1) continue;
       const source = str.slice(0, colonIdx);
-      if (source && !source.startsWith('.') && !source.startsWith('/') && !source.startsWith('~')) {
+      if (source && !source.startsWith('.') && !source.startsWith('/') && !source.startsWith('~') && !source.startsWith('$')) {
         names.add(source);
       }
     }
