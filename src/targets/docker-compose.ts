@@ -124,12 +124,32 @@ export async function writeMultiProfileComposeFile(
   // Collect all services (flat) for volume/network detection later
   const allServicesFlat: Record<string, Record<string, unknown>> = {};
 
-  // ── First pass: determine which services are profiled (varying env) ──
+  // ── First pass: determine which services are directly profiled (varying env) ──
   const profiledServices = new Set<string>();
   for (const [serviceName, profileMap] of serviceData) {
     const profiles = [...profileMap.keys()];
     if (profiles.length > 1 && !allProfilesIdentical(profileMap)) {
       profiledServices.add(serviceName);
+    }
+  }
+
+  // ── Propagate profiling through depends_on (contagious) ──
+  // If service A depends on profiled service B, A must also become profiled.
+  // Repeat until stable — profiling is transitive.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [serviceName, profileMap] of serviceData) {
+      if (profiledServices.has(serviceName)) continue;
+
+      // Check if any profile's config has depends_on referencing a profiled service
+      for (const [, data] of profileMap) {
+        if (dependsOnProfiledService(data.config.depends_on, profiledServices)) {
+          profiledServices.add(serviceName);
+          changed = true;
+          break;
+        }
+      }
     }
   }
 
@@ -374,6 +394,23 @@ function addToServices(docContents: YAMLMap, name: string, node: unknown): void 
     docContents.add(new Pair(new Scalar('services'), servicesNode));
   }
   servicesNode.add(new Pair(new Scalar(name), node));
+}
+
+/**
+ * Check if a depends_on value references any profiled service.
+ */
+function dependsOnProfiledService(
+  dependsOn: unknown,
+  profiledServices: Set<string>
+): boolean {
+  if (!dependsOn) return false;
+  if (Array.isArray(dependsOn)) {
+    return dependsOn.some(dep => profiledServices.has(String(dep)));
+  }
+  if (typeof dependsOn === 'object') {
+    return Object.keys(dependsOn as Record<string, unknown>).some(name => profiledServices.has(name));
+  }
+  return false;
 }
 
 /**
