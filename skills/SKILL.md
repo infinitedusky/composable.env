@@ -170,6 +170,39 @@ Multiple contracts targeting the same service are **additive** — both `config`
 - `target` only → writes into docker-compose.yml (Docker only)
 - Both → writes to both (local dev + Docker from the same contract)
 
+### Multi-profile compose output
+
+When `ce build` detects target contracts, it builds **all profiles** into one compose file. Shared Docker config (image, ports, volumes) goes into `x-` YAML anchor blocks. Per-profile variants use `<<: *anchor` merge and Docker Compose `profiles:` arrays:
+
+```yaml
+x-app: &app-base
+  build: { context: ".", dockerfile: "Dockerfile" }
+  ports: ["4000:4000"]
+  restart: unless-stopped
+
+services:
+  app-local:
+    <<: *app-base
+    profiles: ["local"]
+    environment:
+      DATABASE_URL: postgresql://localhost:5432/dev
+
+  app-production:
+    <<: *app-base
+    profiles: ["production"]
+    environment:
+      DATABASE_URL: postgresql://db.prod.internal:5432/app
+
+  redis:
+    image: redis:7-alpine    # identical across profiles → no profiles: key
+```
+
+Switch environments without rebuilding: `docker compose --profile local up` vs `docker compose --profile production up`.
+
+Services with identical config and environment across all profiles appear once with no `profiles:` key (always started). `onlyProfiles` on contracts controls which profiles include that contract.
+
+All `.env.{profile}` files for location contracts are also built for every profile in a single pass.
+
 Key points:
 - docker-compose.yml is fully generated — no template, no hand-editing
 - `config` handles everything Docker Compose supports: image, build, ports, volumes, healthchecks, deploy, networks, etc.

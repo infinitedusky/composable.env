@@ -1,11 +1,11 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { EnvironmentBuilder, loadConfig } from '../../src/index.js';
+import { EnvironmentBuilder, ContractManager, loadConfig } from '../../src/index.js';
 
 export function registerBuildCommand(program: Command): void {
   program
     .command('build')
-    .description('Build .env files from a profile')
+    .description('Build .env files and docker-compose.yml from contracts')
     .option('-p, --profile [name]', 'Profile name (or set CE_PROFILE env var)')
     .option('-o, --output <path>', 'Output path for single-file builds', '.env')
     .action(async (options) => {
@@ -17,17 +17,30 @@ export function registerBuildCommand(program: Command): void {
       const builder = new EnvironmentBuilder(configDir, options.output, profile, config.envDir);
 
       try {
-        console.log(chalk.blue(`Building from profile: ${profile}`));
-        const result = await builder.buildFromProfile(profile);
+        // Check if any contracts have targets — if so, build all profiles
+        const contractManager = new ContractManager(configDir, config.envDir);
+        await contractManager.initialize();
+        const hasTargets = [...contractManager.getContracts().values()].some(c => c.target);
+
+        let result;
+        if (hasTargets) {
+          const allProfiles = builder.discoverAllProfileNames();
+          console.log(chalk.blue(`Building all profiles: ${allProfiles.join(', ')}`));
+          console.log(chalk.gray(`   (target contracts detected — multi-profile compose output)`));
+          result = await builder.buildAllProfiles();
+        } else {
+          console.log(chalk.blue(`Building from profile: ${profile}`));
+          result = await builder.buildFromProfile(profile);
+        }
 
         if (result.success) {
-          console.log(chalk.green(`\u2705 Environment built successfully`));
+          console.log(chalk.green(`✅ Environment built successfully`));
           if (result.warnings?.length) {
             result.warnings.forEach(w => console.log(chalk.yellow(`   ${w}`)));
           }
           console.log(chalk.gray(`   Files: ${result.envPath}`));
         } else {
-          console.error(chalk.red('\u274c Build failed:'));
+          console.error(chalk.red('❌ Build failed:'));
           result.errors?.forEach(e => console.error(chalk.red(`   ${e}`)));
           if (result.warnings?.length) {
             result.warnings.forEach(w => console.log(chalk.yellow(`   ${w}`)));
@@ -35,7 +48,7 @@ export function registerBuildCommand(program: Command): void {
           process.exit(1);
         }
       } catch (error) {
-        console.error(chalk.red(`\u274c Unexpected error: ${error}`));
+        console.error(chalk.red(`❌ Unexpected error: ${error}`));
         process.exit(1);
       }
     });

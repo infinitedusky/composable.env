@@ -10,7 +10,12 @@ import {
   DockerServiceConfig,
 } from './types.js';
 import { ContractManager, isNewFormatContract } from './contracts.js';
-import { writeDockerComposeFile, type ComposeServiceEntry } from './targets/docker-compose.js';
+import {
+  writeDockerComposeFile,
+  writeMultiProfileComposeFile,
+  type ComposeServiceEntry,
+  type ComposeMultiProfileEntry,
+} from './targets/docker-compose.js';
 
 export class EnvironmentBuilder {
   private configDir: string;
@@ -312,6 +317,254 @@ export class EnvironmentBuilder {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Discover all profile names from JSON files AND component [section] names.
+   */
+  discoverAllProfileNames(): string[] {
+    const names = new Set<string>();
+
+    // From profile JSON files
+    for (const p of this.listProfiles()) {
+      names.add(p.name);
+    }
+
+    // From component [section] names (excluding 'default')
+    const components = this.discoverComponents();
+    for (const component of components) {
+      const componentPath = path.join(this.configDir, this.envDir, 'components', `${component}.env`);
+      try {
+        const content = fs.readFileSync(componentPath, 'utf8');
+        const config = ini.parse(content) as EnvironmentConfig;
+        for (const section of Object.keys(config)) {
+          if (section !== 'default' && typeof config[section] === 'object') {
+            names.add(section);
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return [...names].sort();
+  }
+
+  /**
+   * Build ALL profiles at once.
+   *
+   * - For each profile: resolves vars and writes .env.{profile} for location contracts
+   * - For target contracts: collects multi-profile entries and writes one compose file
+   *   with YAML anchors for shared config and Docker Compose profiles: for per-env variants
+   */
+  async buildAllProfiles(): Promise<BuildResult> {
+    await this.initialize();
+
+    const allComponents = this.discoverComponents();
+    if (allComponents.length === 0) {
+      return {
+        success: false,
+        envPath: this.outputPath,
+        errors: [`No component files found in ${this.envDir}/components/`],
+      };
+    }
+
+    const profileNames = this.discoverAllProfileNames();
+    if (profileNames.length === 0) {
+      return {
+        success: false,
+        envPath: this.outputPath,
+        errors: ['No profiles found. Create profile JSON files or add [section] names to components.'],
+      };
+    }
+
+    const allContracts = this.contracts.getContracts();
+    const useNewFormat = this.contracts.hasNewFormatContracts();
+
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const generatedFiles: string[] = [];
+
+    // Collect multi-profile compose entries across all profiles
+    const composeGroups = new Map<string, ComposeMultiProfileEntry[]>();
+
+    for (const profileName of profileNames) {
+      // Resolve this profile's component pool
+      const { profileData, inheritanceChain } = this.resolveProfileData(profileName, allComponents);
+
+      // Build merged components
+      const mergedComponents: Components = {};
+      const profileOverrides = profileData.components || {};
+      for (const component of allComponents) {
+        const sections: string[] = ['default'];
+        if (profileOverrides[component]) {
+          const override = profileOverrides[component];
+          Array.isArray(override) ? sections.push(...override) : sections.push(override);
+        } else if (inheritanceChain.length > 0) {
+          sections.push(...inheritanceChain);
+        }
+        for (const chainProfile of inheritanceChain) {
+          if (!sections.includes(chainProfile)) sections.push(chainProfile);
+        }
+        mergedComponents[component] = sections;
+      }
+
+      // Filter contracts by onlyProfiles
+      const availableContracts = new Map(
+        [...allContracts].filter(([, contract]) => {
+          if (!contract.onlyProfiles || contract.onlyProfiles.length === 0) return true;
+          return contract.onlyProfiles.includes(profileName);
+        })
+      );
+
+      // Resolve component pool
+      let componentPool: Map<string, Record<string, string>> | undefined;
+      let flatPool: Record<string, string>;
+
+      if (useNewFormat) {
+        componentPool = await this.loadScopedComponentPool(mergedComponents, profileName);
+        flatPool = this.flattenComponentPool(componentPool);
+      } else {
+        flatPool = await this.loadFlatComponentPool(mergedComponents);
+        await this.loadSharedFiles(flatPool);
+      }
+
+      const resolvedPool = this.resolveVariables(flatPool);
+
+      // Validate contracts for this profile
+      for (const [serviceName, contract] of availableContracts) {
+        if (isNewFormatContract(contract) && componentPool) {
+          const validation = this.contracts.validateVarsContract(serviceName, componentPool);
+          if (!validation.valid) {
+            errors.push(
+              `[${profileName}] Service '${serviceName}' missing required variables: ${validation.missing.join(', ')}`
+            );
+          }
+        } else {
+          const validation = this.contracts.validateContract(serviceName, resolvedPool);
+          if (!validation.valid) {
+            errors.push(
+              `[${profileName}] Service '${serviceName}' missing required variables: ${validation.missing.join(', ')}`
+            );
+          }
+        }
+      }
+
+      if (errors.length > 0) continue; // validate all profiles before failing
+
+      // Write .env.{profile} for location contracts
+      for (const [serviceName, contract] of availableContracts) {
+        if (contract.location) {
+          const outputPath = `${contract.location}/.env.${profileName}`;
+          const outputDir = path.dirname(outputPath);
+          if (!fs.existsSync(outputDir)) {
+            await fs.promises.mkdir(outputDir, { recursive: true });
+          }
+          await this.generateServiceEnvFile(
+            serviceName, resolvedPool, outputPath, profileName, componentPool
+          );
+          generatedFiles.push(outputPath);
+        }
+
+        // Collect target entries for multi-profile compose
+        if (contract.target) {
+          const filePath = contract.target.file;
+          if (!composeGroups.has(filePath)) {
+            composeGroups.set(filePath, []);
+          }
+
+          let serviceVars: Record<string, string>;
+          if (useNewFormat && componentPool) {
+            serviceVars = this.contracts.mapVarsContract(serviceName, componentPool);
+          } else {
+            serviceVars = this.contracts.mapContractVariables(serviceName, resolvedPool);
+          }
+
+          if (contract.defaults) {
+            for (const [key, value] of Object.entries(contract.defaults)) {
+              if (serviceVars[key] === undefined) {
+                serviceVars[key] = value;
+              }
+            }
+          }
+
+          composeGroups.get(filePath)!.push({
+            contractName: serviceName,
+            serviceName: contract.target.service,
+            vars: serviceVars,
+            config: contract.target.config,
+            profileName,
+          });
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      return {
+        success: false,
+        envPath: this.outputPath,
+        errors,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      };
+    }
+
+    // Write multi-profile compose files
+    for (const [filePath, entries] of composeGroups) {
+      const result = await writeMultiProfileComposeFile(filePath, entries, profileNames);
+      warnings.push(...result.warnings);
+      generatedFiles.push(filePath);
+    }
+
+    warnings.push(`Built ${profileNames.length} profiles: ${profileNames.join(', ')}`);
+
+    return {
+      success: true,
+      envPath: generatedFiles.join(', '),
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
+  }
+
+  /**
+   * Resolve profile data and inheritance chain for a given profile name.
+   * Returns default-like data if the profile has no JSON file but has component sections.
+   */
+  private resolveProfileData(
+    profileName: string,
+    allComponents: string[]
+  ): { profileData: Profile; inheritanceChain: string[] } {
+    if (profileName === 'default') {
+      return {
+        profileData: { name: 'Default', description: 'Default environment', components: {} },
+        inheritanceChain: [],
+      };
+    }
+
+    const profilePath = path.join(this.configDir, this.envDir, 'profiles', `${profileName}.json`);
+    if (fs.existsSync(profilePath)) {
+      const loaded = this.loadProfileWithInheritance(profileName);
+      return {
+        profileData: loaded.profileData,
+        inheritanceChain: loaded.inheritanceChain,
+      };
+    }
+
+    // No JSON — section-based profile
+    if (this.profileSectionExists(profileName, allComponents)) {
+      return {
+        profileData: {
+          name: profileName,
+          description: `Auto-generated from [${profileName}] sections`,
+          components: {},
+        },
+        inheritanceChain: [profileName],
+      };
+    }
+
+    // Profile doesn't exist at all — return empty (caller should have validated)
+    return {
+      profileData: { name: profileName, description: '', components: {} },
+      inheritanceChain: [profileName],
+    };
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 {
   "name": "composable.env",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Composable environment management: build .env files for every service from reusable components, profiles, and contracts.",
   "type": "module",
   "main": "dist/src/index.js",
