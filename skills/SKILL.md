@@ -199,7 +199,7 @@ services:
 
 Switch environments without rebuilding: `docker compose --profile local up` vs `docker compose --profile production up`.
 
-Services with identical config and environment across all profiles appear once with no `profiles:` key (always started). `onlyProfiles` on contracts controls which profiles include that contract.
+Every service is always profiled — names are always `{service}-{profile}` (e.g., `redis-local`). No bare `docker compose up`; always use `--profile`. `onlyProfiles` on contracts controls which profiles include that contract. Hostnames in environment values are auto-rewritten to profiled names (`game-server` → `game-server-local`), and `depends_on` references are rewritten to match.
 
 `ce build` (no profile flag) writes `.env.{profile}` for every profile. `ce build --profile X` writes only `.env.X` but the compose file still includes all profiles.
 

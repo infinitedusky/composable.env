@@ -124,34 +124,10 @@ export async function writeMultiProfileComposeFile(
   // Collect all services (flat) for volume/network detection later
   const allServicesFlat: Record<string, Record<string, unknown>> = {};
 
-  // ── First pass: determine which services are directly profiled (varying env) ──
-  const profiledServices = new Set<string>();
-  for (const [serviceName, profileMap] of serviceData) {
-    const profiles = [...profileMap.keys()];
-    if (profiles.length > 1 && !allProfilesIdentical(profileMap)) {
-      profiledServices.add(serviceName);
-    }
-  }
-
-  // ── Propagate profiling through depends_on (contagious) ──
-  // If service A depends on profiled service B, A must also become profiled.
-  // Repeat until stable — profiling is transitive.
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [serviceName, profileMap] of serviceData) {
-      if (profiledServices.has(serviceName)) continue;
-
-      // Check if any profile's config has depends_on referencing a profiled service
-      for (const [, data] of profileMap) {
-        if (dependsOnProfiledService(data.config.depends_on, profiledServices)) {
-          profiledServices.add(serviceName);
-          changed = true;
-          break;
-        }
-      }
-    }
-  }
+  // ── All services are profiled. Always. ──
+  // Service names are always {name}-{profile}. No exceptions, no optimization.
+  // Even with one profile, redis becomes redis-local. Consistent and predictable.
+  const profiledServices = new Set<string>(serviceData.keys());
 
   // ── Rewrite hostnames: profiled service names in vars get profile suffix ──
   // e.g., HOST=game-server → game-server-local when building local profile
@@ -208,28 +184,12 @@ export async function writeMultiProfileComposeFile(
     }
   }
 
-  // ── Third pass: emit all services (after all anchors are defined) ──
+  // ── Emit all services (after all anchors are defined) ──
   for (const [serviceName, profileMap] of serviceData) {
     const profiles = [...profileMap.keys()];
-    const isProfiled = profiledServices.has(serviceName);
-
-    if (!isProfiled) {
-      // Single profile or identical across profiles — emit once, no profiles: key
-      const firstProfile = profiles[0];
-      const data = profileMap.get(firstProfile)!;
-      const serviceObj: Record<string, unknown> = { ...data.config };
-      if (Object.keys(data.vars).length > 0) {
-        serviceObj.environment = { ...data.vars };
-      }
-
-      allServicesFlat[serviceName] = serviceObj;
-
-      const serviceNode = doc.createNode(serviceObj);
-      addToServices(docContents, serviceName, serviceNode);
-    } else {
-      const sharedConfig = sharedConfigs.get(serviceName) || {};
-      const sharedDependsOn = sharedDependsOns.get(serviceName);
-      const anchorName = `${serviceName}-base`;
+    const sharedConfig = sharedConfigs.get(serviceName) || {};
+    const sharedDependsOn = sharedDependsOns.get(serviceName);
+    const anchorName = `${serviceName}-base`;
 
       // Create per-profile service variants
       for (const profileName of profiles) {
@@ -273,7 +233,6 @@ export async function writeMultiProfileComposeFile(
 
         addToServices(docContents, variantName, variantNode);
       }
-    }
   }
 
   // ── Auto-detect top-level volumes and networks ──
@@ -436,23 +395,6 @@ function addToServices(docContents: YAMLMap, name: string, node: unknown): void 
 }
 
 /**
- * Check if a depends_on value references any profiled service.
- */
-function dependsOnProfiledService(
-  dependsOn: unknown,
-  profiledServices: Set<string>
-): boolean {
-  if (!dependsOn) return false;
-  if (Array.isArray(dependsOn)) {
-    return dependsOn.some(dep => profiledServices.has(String(dep)));
-  }
-  if (typeof dependsOn === 'object') {
-    return Object.keys(dependsOn as Record<string, unknown>).some(name => profiledServices.has(name));
-  }
-  return false;
-}
-
-/**
  * Rewrite depends_on references: if a dependency is a profiled service,
  * replace it with the profile-suffixed variant name.
  *
@@ -479,22 +421,6 @@ function rewriteDependsOn(
     return result;
   }
   return dependsOn;
-}
-
-/**
- * Check if all profiles for a service produce identical environment vars.
- */
-function allProfilesIdentical(
-  profileMap: Map<string, { config: Record<string, unknown>; vars: Record<string, string> }>
-): boolean {
-  const profiles = [...profileMap.values()];
-  if (profiles.length <= 1) return true;
-
-  const firstVars = JSON.stringify(sortedEntries(profiles[0].vars));
-  for (let i = 1; i < profiles.length; i++) {
-    if (JSON.stringify(sortedEntries(profiles[i].vars)) !== firstVars) return false;
-  }
-  return true;
 }
 
 /**
@@ -539,10 +465,6 @@ function getPerProfileConfig(
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function sortedEntries(obj: Record<string, string>): [string, string][] {
-  return Object.entries(obj).sort(([a], [b]) => a.localeCompare(b));
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
