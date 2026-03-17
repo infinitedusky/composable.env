@@ -93,10 +93,17 @@ export const CeScriptsConfigSchema = z.object({
 
 export type CeScriptsConfig = z.infer<typeof CeScriptsConfigSchema>;
 
+export const CeProfileConfigSchema = z.object({
+  suffix: z.string(),
+}).strict();
+
+export type CeProfileConfig = z.infer<typeof CeProfileConfigSchema>;
+
 export const CeConfigSchema = z.object({
   envDir: z.string().default('env'),
   defaultProfile: z.string().default('default'),
   scripts: CeScriptsConfigSchema.optional(),
+  profiles: z.record(z.string(), CeProfileConfigSchema).optional(),
 }).strict();
 
 export type CeConfig = z.infer<typeof CeConfigSchema>;

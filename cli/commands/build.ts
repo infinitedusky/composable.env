@@ -32,7 +32,11 @@ export function registerBuildCommand(program: Command): void {
           } else {
             console.log(chalk.blue(`Building all profiles: ${allProfiles.join(', ')}`));
           }
-          result = await builder.buildAllProfiles(explicitProfile);
+          // Build suffix map from ce.json profiles config
+          const profileSuffixes = config.profiles
+            ? Object.fromEntries(Object.entries(config.profiles).map(([name, cfg]) => [name, cfg.suffix]))
+            : undefined;
+          result = await builder.buildAllProfiles(explicitProfile, profileSuffixes);
         } else {
           console.log(chalk.blue(`Building from profile: ${profile}`));
           result = await builder.buildFromProfile(profile);

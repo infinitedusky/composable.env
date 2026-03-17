@@ -34,10 +34,22 @@ export interface ComposeWriteResult {
  *
  * Uses YAML 1.1 merge keys (<<:) which Docker Compose explicitly supports.
  */
+/**
+ * Get the service name suffix for a profile.
+ * Uses ce.json profiles config if available, otherwise defaults to `-{profileName}`.
+ */
+function getProfileSuffix(profileName: string, profileSuffixes?: Record<string, string>): string {
+  if (profileSuffixes && profileName in profileSuffixes) {
+    return profileSuffixes[profileName];
+  }
+  return `-${profileName}`;
+}
+
 export async function writeMultiProfileComposeFile(
   filePath: string,
   entries: ComposeMultiProfileEntry[],
-  profileNames: string[]
+  profileNames: string[],
+  profileSuffixes?: Record<string, string>
 ): Promise<ComposeWriteResult> {
   const warnings: string[] = [];
 
@@ -148,7 +160,8 @@ export async function writeMultiProfileComposeFile(
           // NOT after / in paths (e.g., /engine is a DB name, not a hostname)
           const escaped = escapeRegex(svcName);
           const pattern = new RegExp(`(?<=://)${escaped}(?=[:/?#]|$)|(?<=@)${escaped}(?=[:/?#]|$)|^${escaped}$`, 'g');
-          rewritten = rewritten.replace(pattern, `${svcName}-${profileName}`);
+          const suffix = getProfileSuffix(profileName, profileSuffixes);
+          rewritten = rewritten.replace(pattern, `${svcName}${suffix}`);
         }
         if (rewritten !== value) {
           data.vars[key] = rewritten;
@@ -194,7 +207,8 @@ export async function writeMultiProfileComposeFile(
       // Create per-profile service variants
       for (const profileName of profiles) {
         const data = profileMap.get(profileName)!;
-        const variantName = `${serviceName}-${profileName}`;
+        const suffix = getProfileSuffix(profileName, profileSuffixes);
+        const variantName = `${serviceName}${suffix}`;
 
         const variantNode = new YAMLMap();
 
@@ -212,7 +226,7 @@ export async function writeMultiProfileComposeFile(
         // Add depends_on with profiled service name rewriting
         const rawDependsOn = data.config.depends_on ?? sharedDependsOn;
         if (rawDependsOn) {
-          const rewritten = rewriteDependsOn(rawDependsOn, profiledServices, profileName);
+          const rewritten = rewriteDependsOn(rawDependsOn, profiledServices, profileName, profileSuffixes);
           variantNode.add(doc.createPair('depends_on', doc.createNode(rewritten)));
         }
 
@@ -404,18 +418,21 @@ function addToServices(docContents: YAMLMap, name: string, node: unknown): void 
 function rewriteDependsOn(
   dependsOn: unknown,
   profiledServices: Set<string>,
-  profileName: string
+  profileName: string,
+  profileSuffixes?: Record<string, string>
 ): unknown {
   if (Array.isArray(dependsOn)) {
     return dependsOn.map(dep => {
       const name = String(dep);
-      return profiledServices.has(name) ? `${name}-${profileName}` : name;
+      const suffix = getProfileSuffix(profileName, profileSuffixes);
+      return profiledServices.has(name) ? `${name}${suffix}` : name;
     });
   }
   if (dependsOn && typeof dependsOn === 'object') {
     const result: Record<string, unknown> = {};
     for (const [name, value] of Object.entries(dependsOn as Record<string, unknown>)) {
-      const key = profiledServices.has(name) ? `${name}-${profileName}` : name;
+      const suffix = getProfileSuffix(profileName, profileSuffixes);
+      const key = profiledServices.has(name) ? `${name}${suffix}` : name;
       result[key] = value;
     }
     return result;

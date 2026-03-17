@@ -334,7 +334,7 @@ export class EnvironmentBuilder {
    *                     If omitted, write .env files for ALL profiles.
    *                     The compose file always includes all profiles regardless.
    */
-  async buildAllProfiles(envProfile?: string): Promise<BuildResult> {
+  async buildAllProfiles(envProfile?: string, profileSuffixes?: Record<string, string>): Promise<BuildResult> {
     await this.initialize();
 
     const allComponents = this.discoverComponents();
@@ -490,7 +490,7 @@ export class EnvironmentBuilder {
 
     // Write multi-profile compose files
     for (const [filePath, entries] of composeGroups) {
-      const result = await writeMultiProfileComposeFile(filePath, entries, profileNames);
+      const result = await writeMultiProfileComposeFile(filePath, entries, profileNames, profileSuffixes);
       warnings.push(...result.warnings);
       generatedFiles.push(filePath);
     }
