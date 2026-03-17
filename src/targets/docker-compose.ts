@@ -153,7 +153,34 @@ export async function writeMultiProfileComposeFile(
     }
   }
 
-  // ── Second pass: emit services, rewriting depends_on for profiled refs ──
+  // ── Second pass: emit x- anchors FIRST (must appear before aliases) ──
+  // Pre-compute shared configs and depends_on for profiled services
+  const sharedConfigs = new Map<string, Record<string, unknown>>();
+  const sharedDependsOns = new Map<string, unknown>();
+
+  for (const [serviceName, profileMap] of serviceData) {
+    if (!profiledServices.has(serviceName)) continue;
+
+    const sharedConfig = extractSharedConfig(profileMap);
+
+    // Pull depends_on out of shared config — it needs per-profile rewriting
+    if ('depends_on' in sharedConfig) {
+      sharedDependsOns.set(serviceName, sharedConfig.depends_on);
+      delete sharedConfig.depends_on;
+    }
+
+    sharedConfigs.set(serviceName, sharedConfig);
+
+    // Emit x- anchor block
+    const anchorName = `${serviceName}-base`;
+    if (Object.keys(sharedConfig).length > 0) {
+      const anchorNode = doc.createNode(sharedConfig) as YAMLMap;
+      anchorNode.anchor = anchorName;
+      docContents.add(doc.createPair(`x-${serviceName}`, anchorNode));
+    }
+  }
+
+  // ── Third pass: emit all services (after all anchors are defined) ──
   for (const [serviceName, profileMap] of serviceData) {
     const profiles = [...profileMap.keys()];
     const isProfiled = profiledServices.has(serviceName);
@@ -172,25 +199,9 @@ export async function writeMultiProfileComposeFile(
       const serviceNode = doc.createNode(serviceObj);
       addToServices(docContents, serviceName, serviceNode);
     } else {
-      // Varying env across profiles — use x- anchor for shared config
-      const sharedConfig = extractSharedConfig(profileMap);
-
-      // Remove depends_on from shared config — it needs per-profile rewriting
-      const sharedHasDependsOn = 'depends_on' in sharedConfig;
-      const sharedDependsOn = sharedConfig.depends_on;
-      if (sharedHasDependsOn) {
-        delete sharedConfig.depends_on;
-      }
-
+      const sharedConfig = sharedConfigs.get(serviceName) || {};
+      const sharedDependsOn = sharedDependsOns.get(serviceName);
       const anchorName = `${serviceName}-base`;
-
-      // Create the x- extension node with anchor
-      if (Object.keys(sharedConfig).length > 0) {
-        const anchorNode = doc.createNode(sharedConfig) as YAMLMap;
-        anchorNode.anchor = anchorName;
-        const extensionKey = `x-${serviceName}`;
-        docContents.add(doc.createPair(extensionKey, anchorNode));
-      }
 
       // Create per-profile service variants
       for (const profileName of profiles) {
