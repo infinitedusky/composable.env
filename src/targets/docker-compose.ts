@@ -165,10 +165,13 @@ export async function writeMultiProfileComposeFile(
         let rewritten = value;
         for (const svcName of profiledServices) {
           if (!allServiceNames.has(svcName)) continue;
-          // Replace exact match or embedded in URLs (word boundary aware)
-          // Use a regex that matches the service name as a standalone hostname
-          // e.g., "game-server" in "postgresql://user@game-server:5432/db"
-          const pattern = new RegExp(`(?<=[/@])${escapeRegex(svcName)}(?=[:/?#]|$)|^${escapeRegex(svcName)}$`, 'g');
+          // Match service name only in hostname positions:
+          // 1. After :// (scheme://hostname)
+          // 2. After @ (user@hostname)
+          // 3. Exact value match (HOST=hostname)
+          // NOT after / in paths (e.g., /engine is a DB name, not a hostname)
+          const escaped = escapeRegex(svcName);
+          const pattern = new RegExp(`(?<=://)${escaped}(?=[:/?#]|$)|(?<=@)${escaped}(?=[:/?#]|$)|^${escaped}$`, 'g');
           rewritten = rewritten.replace(pattern, `${svcName}-${profileName}`);
         }
         if (rewritten !== value) {
