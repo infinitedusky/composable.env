@@ -36,6 +36,10 @@ export interface ServiceContract {
   // If omitted, the contract is included for all profiles.
   onlyProfiles?: string[];
 
+  // Var set inheritance: merge named var sets into this contract's vars.
+  // Resolves *.vars.json files from env/contracts/. Contract's own vars win on conflict.
+  includeVars?: string[];
+
   // New format: ${component.KEY} mappings
   vars?: Record<string, string>;
 
@@ -65,6 +69,7 @@ export class ContractManager {
 
   async initialize(): Promise<void> {
     await this.loadContracts();
+    this.resolveAllIncludeVars();
   }
 
   /**
@@ -161,6 +166,78 @@ export class ContractManager {
           console.warn(`Failed to load contract ${file}:`, msg);
         }
       }
+    }
+  }
+
+  // ─── includeVars resolution ──────────────────────────────────────────────
+
+  /**
+   * Load a var set from env/contracts/{name}.vars.json.
+   * Var sets contain { vars: Record<string, string>, includeVars?: string[] }.
+   */
+  private loadVarSet(name: string): { vars: Record<string, string>; includeVars?: string[] } {
+    const filePath = path.join(this.contractsDir, `${name}.vars.json`);
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Var set '${name}' not found at ${filePath}`);
+    }
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  }
+
+  /**
+   * Resolve a var set's includes recursively, returning merged vars.
+   * Detects cycles. Includes merge left-to-right, then the set's own vars on top.
+   */
+  private resolveVarSet(
+    name: string,
+    visited: Set<string> = new Set()
+  ): Record<string, string> {
+    if (visited.has(name)) {
+      throw new Error(
+        `Circular includeVars: ${[...visited].join(' → ')} → ${name}`
+      );
+    }
+    visited.add(name);
+
+    const varSet = this.loadVarSet(name);
+    let merged: Record<string, string> = {};
+
+    // Resolve chained includes first
+    if (varSet.includeVars) {
+      for (const include of varSet.includeVars) {
+        const resolved = this.resolveVarSet(include, new Set(visited));
+        merged = { ...merged, ...resolved };
+      }
+    }
+
+    // Own vars win on conflict
+    merged = { ...merged, ...varSet.vars };
+    return merged;
+  }
+
+  /**
+   * For every loaded contract with includeVars, resolve and merge the var sets
+   * into the contract's vars. Contract's own vars always win.
+   */
+  private resolveAllIncludeVars(): void {
+    for (const [serviceName, contract] of this.contracts) {
+      if (!contract.includeVars || contract.includeVars.length === 0) continue;
+
+      let merged: Record<string, string> = {};
+
+      for (const include of contract.includeVars) {
+        try {
+          const resolved = this.resolveVarSet(include);
+          merged = { ...merged, ...resolved };
+        } catch (err) {
+          console.warn(
+            `Failed to resolve includeVars '${include}' for contract '${serviceName}':`,
+            err instanceof Error ? err.message : String(err)
+          );
+        }
+      }
+
+      // Contract's own vars win on conflict
+      contract.vars = { ...merged, ...(contract.vars || {}) };
     }
   }
 
