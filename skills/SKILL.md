@@ -10,6 +10,7 @@ You are helping a user work with **composable.env** (`ce`), a tool that builds `
 - **Components** (`env/components/*.env`) — INI files with `[default]`, `[production]`, etc. sections. Auto-discovered from filesystem. This is where non-secret, shared values live — they get versioned in git.
 - **Profiles** (`env/profiles/*.json`) — Optional section overrides per environment. Support `"extends"` inheritance.
 - **Contracts** (`env/contracts/*.contract.json`) — Declare what variables a service needs via `vars` field with `${component.KEY}` references.
+- **Var sets** (`env/contracts/*.vars.json`) — Reusable variable bundles. Contracts use `includeVars: ["platform-base"]` to inherit shared vars. Var sets can chain. Contract's own vars win on conflict.
 
 ## Value layers — who is each file for?
 
@@ -120,6 +121,37 @@ Profile resolution: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultPr
 - `defaults` provides fallbacks for unresolvable vars
 - `dev` defines how `ce start` runs this service via PM2
 - `onlyProfiles` — optional array of ce profile names. If set, the contract is only included when building one of those profiles. Useful for dev-only services (log aggregators, debug tools) that shouldn't exist in production builds
+- `includeVars` — array of var set names to inherit. Resolves `*.vars.json` files from `env/contracts/`. Merged left-to-right, contract's own vars win on conflict
+
+### Var sets (`*.vars.json`)
+
+Reusable variable bundles that multiple contracts can inherit:
+
+```json
+// env/contracts/platform-base.vars.json
+{
+  "vars": {
+    "DATABASE_URL": "${database.URL}",
+    "ADMIN_SERVER_URL": "${admin-server.URL}",
+    "ADMIN_SERVICE_KEY": "${admin.SERVICE_KEY}"
+  }
+}
+```
+
+```json
+// env/contracts/poker.contract.json
+{
+  "name": "poker",
+  "location": "apps/poker",
+  "includeVars": ["platform-base"],
+  "vars": {
+    "NEXT_PUBLIC_WS_HOST": "${game-server.HOST}",
+    "PORT": "3666"
+  }
+}
+```
+
+Poker gets all 3 platform-base vars + its 2 own vars. One place to update when platform-wide vars change. Var sets can themselves include other var sets (chaining), with cycle detection.
 
 ## Docker Compose target
 
@@ -233,7 +265,7 @@ NAME=myapp
 
 1. **Never assemble URLs in contracts** — composite values like `DATABASE_URL` belong in the component. Contracts should reference `${database.URL}`, not `${database.PROTOCOL}://${database.USER}@${database.HOST}:${database.PORT}/${database.NAME}`. If 5 contracts all build the same URL inline, that's 5 places to update when the format changes.
 2. **Never hardcode values in contracts** — every value should be a `${component.KEY}` or `${secrets.KEY}` reference. Use `defaults` only for truly static fallback values like `LOG_LEVEL=info`. A URL like `http://localhost:3665` should be `${game-server.URL}` so it varies by profile.
-3. **Don't duplicate expressions across contracts** — if multiple contracts need the same assembled value, put it in a component and reference it. One source of truth, many consumers.
+3. **Don't duplicate vars across contracts** — if multiple contracts need the same set of variables, extract them into a `*.vars.json` file and use `includeVars`. If they need the same assembled value, put it in a component. One source of truth, many consumers.
 4. **Don't reference secrets directly in contracts** — secrets should be referenced in components (`${secrets.KEY}`), and contracts reference components (`${component.KEY}`). This keeps the value mapping clean — a component value might not always be secret, and the contract shouldn't care where the value comes from.
 5. **Don't leave profiles underspecified** — every profile that gets built should produce a complete, working env. If `production.json` only overrides `database` but the app also needs production `blockchain` and `game-server` values, the build will silently use `[default]` values for those. Audit profiles to ensure all components have appropriate section overrides.
 6. **Don't keep vestigial components** — if two components define the same service's config (e.g., `partykit.env` and `game-server.env` both defining HOST for the same server), merge them. One component per logical service.
