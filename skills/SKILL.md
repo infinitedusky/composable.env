@@ -2,7 +2,94 @@
 description: Work with composable.env — build, debug, scaffold, and manage environment configuration
 ---
 
-You are helping a user work with **composable.env** (`ce`), a tool that builds `.env` files for every service from reusable components, profiles, and contracts.
+You are helping a user work with **composable.env** (`ce`), a tool that builds `.env` files and Docker Compose files for every service from reusable components, profiles, and contracts.
+
+## What composable.env solves
+
+In any project with multiple services (APIs, workers, frontends, databases), each service needs environment variables — and many of them overlap. Without ce, you end up with:
+- Scattered `.env` files with duplicated values across services
+- Secrets committed to git or shared insecurely
+- No way to switch between local/staging/production without manual editing
+- Docker Compose files with hardcoded secrets that can't be versioned
+
+ce solves this by separating **what values exist** (components) from **who needs them** (contracts) and **which environment** (profiles). You version the contracts and components in git, and ce generates the `.env` files and `docker-compose.yml` as build artifacts — with secrets resolved at build time, never committed.
+
+## Getting started with a new project
+
+### Prerequisites
+
+- **Node.js 18+** and a package manager (pnpm recommended)
+- **OrbStack** (recommended) or Docker Desktop for running containers locally. OrbStack is faster, lighter, and provides automatic `.orb.local` DNS for containers.
+
+### Setup
+
+```bash
+# Install composable.env
+pnpm add -D composable.env
+
+# Add the CLI alias to package.json scripts
+# "ce": "composable.env"
+
+# Scaffold the env directory and ce.json
+pnpm ce init
+
+# Set your default profile
+# Edit ce.json: { "defaultProfile": "local" }
+```
+
+### First component
+
+Create a component for each logical service (database, redis, your app):
+
+```ini
+# env/components/database.env
+[default]
+HOST=localhost
+PORT=5432
+USER=postgres
+PASSWORD=${secrets.DB_PASSWORD}
+NAME=myapp_dev
+URL=postgresql://${database.USER}:${database.PASSWORD}@${database.HOST}:${database.PORT}/${database.NAME}
+```
+
+### First profile
+
+Create `env/profiles/local.json` — even if it's empty, it defines "local" as a profile:
+
+```json
+{ "name": "local", "description": "Local development" }
+```
+
+### First contract
+
+```json
+// env/contracts/api.contract.json
+{
+  "name": "api",
+  "location": "apps/api",
+  "vars": {
+    "DATABASE_URL": "${database.URL}",
+    "PORT": "${api.PORT}"
+  },
+  "defaults": {
+    "LOG_LEVEL": "info"
+  }
+}
+```
+
+### First secrets file
+
+```ini
+# env/.env.secrets.shared — distribute to team, never commit
+DB_PASSWORD=local-dev-password
+```
+
+### Build and verify
+
+```bash
+pnpm ce build              # builds .env.local in apps/api/
+pnpm ce list               # shows components, profiles, contracts
+```
 
 ## Architecture
 
@@ -101,8 +188,8 @@ Profile resolution: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultPr
   "vars": {
     "DATABASE_URL": "${database.URL}",
     "REDIS_URL": "${redis.URL}",
-    "JWT_SECRET": "${secrets.JWT_SECRET}",
-    "LOG_LEVEL": "${LOG_LEVEL}"
+    "JWT_SECRET": "${auth.JWT_SECRET}",
+    "LOG_LEVEL": "${api.LOG_LEVEL}"
   },
   "defaults": {
     "LOG_LEVEL": "info"
@@ -115,9 +202,8 @@ Profile resolution: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultPr
 ```
 
 - Left side = app variable name (what the service sees)
-- Right side = `${component.KEY}` reference resolved from the pool
-- `${secrets.KEY}` pulls from the secrets layer
-- Bare `${KEY}` resolves from shared/local values
+- Right side = **always** a `${component.KEY}` reference. Contracts only reference components, never secrets directly. Secrets flow through components (`${secrets.KEY}` in a component, `${component.KEY}` in a contract).
+- `defaults` is the **only** place for hardcoded values in a contract — static fallbacks like `LOG_LEVEL=info`. Everything in `vars` should be a `${component.KEY}` reference so values vary by profile.
 - `defaults` provides fallbacks for unresolvable vars
 - `dev` defines how `ce start` runs this service via PM2
 - `onlyProfiles` — optional array of ce profile names. If set, the contract is only included when building one of those profiles. Useful for dev-only services (log aggregators, debug tools) that shouldn't exist in production builds
@@ -191,7 +277,7 @@ One contract defines the container, others add vars to it:
   "vars": {
     "PORT": "${api.PORT}",
     "DATABASE_URL": "${database.URL}",
-    "JWT_SECRET": "${secrets.JWT_SECRET}"
+    "JWT_SECRET": "${auth.JWT_SECRET}"
   },
   "dev": { "command": "pnpm dev" }
 }
@@ -225,8 +311,15 @@ services:
     environment:
       DATABASE_URL: postgresql://db.prod.internal:5432/app
 
-  redis:
-    image: redis:7-alpine    # identical across profiles → no profiles: key
+  redis-local:
+    <<: *redis-base
+    profiles: ["local"]
+    environment: {}
+
+  redis-production:
+    <<: *redis-base
+    profiles: ["production"]
+    environment: {}
 ```
 
 Switch environments without rebuilding: `docker compose --profile local up` vs `docker compose --profile production up`.
@@ -264,7 +357,7 @@ NAME=myapp
 ## Anti-patterns to watch for
 
 1. **Never assemble URLs in contracts** — composite values like `DATABASE_URL` belong in the component. Contracts should reference `${database.URL}`, not `${database.PROTOCOL}://${database.USER}@${database.HOST}:${database.PORT}/${database.NAME}`. If 5 contracts all build the same URL inline, that's 5 places to update when the format changes.
-2. **Never hardcode values in contracts** — every value should be a `${component.KEY}` or `${secrets.KEY}` reference. Use `defaults` only for truly static fallback values like `LOG_LEVEL=info`. A URL like `http://localhost:3665` should be `${game-server.URL}` so it varies by profile.
+2. **Never hardcode values in contract `vars`** — every value in `vars` must be a `${component.KEY}` reference. Hardcoded values only go in `defaults` as static fallbacks (e.g., `"LOG_LEVEL": "info"`). A URL like `http://localhost:3665` in vars should be `${game-server.URL}` so it varies by profile. If you see a literal value in `vars`, it belongs in a component.
 3. **Don't duplicate vars across contracts** — if multiple contracts need the same set of variables, extract them into a `*.vars.json` file and use `includeVars`. If they need the same assembled value, put it in a component. One source of truth, many consumers.
 4. **Don't reference secrets directly in contracts** — secrets should be referenced in components (`${secrets.KEY}`), and contracts reference components (`${component.KEY}`). This keeps the value mapping clean — a component value might not always be secret, and the contract shouldn't care where the value comes from.
 5. **Don't leave profiles underspecified** — every profile that gets built should produce a complete, working env. If `production.json` only overrides `database` but the app also needs production `blockchain` and `game-server` values, the build will silently use `[default]` values for those. Audit profiles to ensure all components have appropriate section overrides.
