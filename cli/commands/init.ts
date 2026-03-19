@@ -17,6 +17,7 @@ export function registerInitCommand(program: Command): void {
     .description('Scaffold a new composable.env directory structure')
     .option('--examples', 'Include example files for all parts of the system')
     .option('--env-dir <path>', 'Custom env directory path (default: "env")')
+    .option('--scaffold <type>', 'Scaffold a complete project template (docker)')
     .action(async (options) => {
       const cwd = process.cwd();
       const registry = new ManagedJsonRegistry(cwd);
@@ -138,16 +139,210 @@ export function registerInitCommand(program: Command): void {
         scaffoldExamples(cwd, envDir, secretsSharedPath, secretsLocalPath, localPath);
       }
 
+      // Scaffold a complete project template
+      if (options.scaffold === 'docker') {
+        scaffoldDocker(cwd, envDir);
+      } else if (options.scaffold && options.scaffold !== 'docker') {
+        console.log(chalk.yellow(`  Unknown scaffold type: ${options.scaffold}. Available: docker`));
+      }
+
       console.log('');
       console.log(chalk.blue('Next steps:'));
-      console.log(`  1. Add component files to ${envDir}/components/  (auto-discovered)`);
-      console.log(`  2. Add profiles to ${envDir}/profiles/  (optional overrides)`);
-      console.log(`  3. Add contract files to ${envDir}/contracts/  (optional)`);
-      console.log('  4. Set up vault for secrets: ce vault init');
-      console.log('  5. Add secrets: ce vault set <KEY> <VALUE>');
-      console.log(`  6. Add local overrides to ${envDir}/.env.local  (gitignored)`);
-      console.log('  7. Run: ce build --profile <name>');
+      if (options.scaffold === 'docker') {
+        console.log(`  1. Add your Next.js apps to ${envDir}/contracts/ as docker-compose targets`);
+        console.log(`  2. Add secrets to ${envDir}/.env.secrets.shared`);
+        console.log('  3. Run: ce build');
+        console.log('  4. Run: docker compose --profile local up');
+      } else {
+        console.log(`  1. Add component files to ${envDir}/components/  (auto-discovered)`);
+        console.log(`  2. Add profiles to ${envDir}/profiles/  (optional overrides)`);
+        console.log(`  3. Add contract files to ${envDir}/contracts/  (optional)`);
+        console.log('  4. Set up vault for secrets: ce vault init');
+        console.log('  5. Add secrets: ce vault set <KEY> <VALUE>');
+        console.log(`  6. Add local overrides to ${envDir}/.env.local  (gitignored)`);
+        console.log('  7. Run: ce build --profile <name>');
+      }
     });
+}
+
+function scaffoldDocker(cwd: string, envDir: string): void {
+  console.log('');
+  console.log(chalk.blue('Scaffolding Docker + Next.js project...'));
+
+  // ── local profile ──
+  const localProfilePath = path.join(cwd, envDir, 'profiles', 'local.json');
+  if (!fs.existsSync(localProfilePath)) {
+    fs.writeFileSync(localProfilePath, JSON.stringify({
+      name: 'local',
+      description: 'Local development with OrbStack',
+    }, null, 2) + '\n');
+    console.log(chalk.green(`  created ${envDir}/profiles/local.json`));
+  }
+
+  // ── production profile ──
+  const prodProfilePath = path.join(cwd, envDir, 'profiles', 'production.json');
+  if (!fs.existsSync(prodProfilePath)) {
+    fs.writeFileSync(prodProfilePath, JSON.stringify({
+      name: 'production',
+      description: 'Production deployment',
+    }, null, 2) + '\n');
+    console.log(chalk.green(`  created ${envDir}/profiles/production.json`));
+  }
+
+  // ── networking component ──
+  const networkingPath = path.join(cwd, envDir, 'components', 'networking.env');
+  if (!fs.existsSync(networkingPath)) {
+    fs.writeFileSync(networkingPath,
+      '; networking.env — DNS and routing per environment\n' +
+      '; OrbStack provides automatic .orb.local DNS for Docker containers\n' +
+      ';\n' +
+      '; Service names in docker-compose become hostnames:\n' +
+      ';   myapp-local → myapp-local.orb.local (from host)\n' +
+      ';   myapp-local → myapp-local (container-to-container)\n\n' +
+      '[default]\n' +
+      'DOMAIN=localhost\n' +
+      'PROFILE_SUFFIX=-local\n' +
+      'BASE_URL=http://localhost\n\n' +
+      '[local]\n' +
+      'DOMAIN=orb.local\n' +
+      'PROFILE_SUFFIX=-local\n' +
+      'BASE_URL=http://localhost\n\n' +
+      '[production]\n' +
+      'DOMAIN=example.com\n' +
+      'PROFILE_SUFFIX=\n' +
+      'BASE_URL=https://example.com\n'
+    );
+    console.log(chalk.green(`  created ${envDir}/components/networking.env`));
+  }
+
+  // ── networking vars contract ──
+  const networkingVarsPath = path.join(cwd, envDir, 'contracts', 'networking.vars.json');
+  if (!fs.existsSync(networkingVarsPath)) {
+    fs.writeFileSync(networkingVarsPath, JSON.stringify({
+      vars: {
+        DOMAIN: '${networking.DOMAIN}',
+        PROFILE_SUFFIX: '${networking.PROFILE_SUFFIX}',
+        BASE_URL: '${networking.BASE_URL}',
+      },
+    }, null, 2) + '\n');
+    console.log(chalk.green(`  created ${envDir}/contracts/networking.vars.json`));
+  }
+
+  // ── docker directory with Dockerfiles ──
+  const dockerDir = path.join(cwd, 'docker');
+  if (!fs.existsSync(dockerDir)) {
+    fs.mkdirSync(dockerDir, { recursive: true });
+    console.log(chalk.green('  created docker/'));
+  }
+
+  // Dockerfile for Next.js local dev (hot reload via volume mounts)
+  const dockerfileDevPath = path.join(dockerDir, 'Dockerfile.nextdev');
+  if (!fs.existsSync(dockerfileDevPath)) {
+    fs.writeFileSync(dockerfileDevPath,
+      '# Next.js local development — hot reload via volume mounts\n' +
+      '# Usage: volume-mount your app source into /app\n' +
+      'FROM node:20-alpine\n' +
+      '\n' +
+      'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
+      '\n' +
+      'WORKDIR /app\n' +
+      '\n' +
+      '# Install dependencies (cached layer)\n' +
+      'COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\n' +
+      'RUN pnpm install --frozen-lockfile\n' +
+      '\n' +
+      '# Source code comes from volume mounts — not copied\n' +
+      '# docker-compose volumes: ["./apps/myapp:/app/apps/myapp"]\n' +
+      '\n' +
+      '# Default: run the app specified by the command field in docker-compose\n' +
+      '# command: is set per-service in the contract target config\n' +
+      'ENTRYPOINT ["pnpm", "exec"]\n'
+    );
+    console.log(chalk.green('  created docker/Dockerfile.nextdev'));
+  }
+
+  // Dockerfile for Next.js production (standalone build, no volume mounts)
+  const dockerfileProdPath = path.join(dockerDir, 'Dockerfile.nextprod');
+  if (!fs.existsSync(dockerfileProdPath)) {
+    fs.writeFileSync(dockerfileProdPath,
+      '# Next.js production build — standalone output, no source code\n' +
+      'FROM node:20-alpine AS base\n' +
+      'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
+      '\n' +
+      '# ── Install dependencies ──\n' +
+      'FROM base AS deps\n' +
+      'WORKDIR /app\n' +
+      'COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\n' +
+      'COPY apps/ ./apps/\n' +
+      'COPY packages/ ./packages/\n' +
+      'RUN pnpm install --frozen-lockfile\n' +
+      '\n' +
+      '# ── Build ──\n' +
+      'FROM deps AS builder\n' +
+      'WORKDIR /app\n' +
+      '# Build args for any vars needed at build time (non-secret only)\n' +
+      'ARG APP_NAME\n' +
+      'RUN pnpm --filter ${APP_NAME} build\n' +
+      '\n' +
+      '# ── Production image ──\n' +
+      'FROM node:20-alpine AS runner\n' +
+      'WORKDIR /app\n' +
+      'ENV NODE_ENV=production\n' +
+      '\n' +
+      '# Next.js standalone output\n' +
+      'COPY --from=builder /app/apps/${APP_NAME}/.next/standalone ./\n' +
+      'COPY --from=builder /app/apps/${APP_NAME}/.next/static ./apps/${APP_NAME}/.next/static\n' +
+      'COPY --from=builder /app/apps/${APP_NAME}/public ./apps/${APP_NAME}/public\n' +
+      '\n' +
+      'EXPOSE 3000\n' +
+      'CMD ["node", "apps/${APP_NAME}/server.js"]\n'
+    );
+    console.log(chalk.green('  created docker/Dockerfile.nextprod'));
+  }
+
+  // ── Example app contract with Docker target ──
+  const exampleContractPath = path.join(cwd, envDir, 'contracts', 'example-app.contract.json');
+  if (!fs.existsSync(exampleContractPath)) {
+    fs.writeFileSync(exampleContractPath, JSON.stringify({
+      name: 'example-app',
+      location: 'apps/example-app',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'example-app',
+        config: {
+          build: { context: '.', dockerfile: 'docker/Dockerfile.nextdev' },
+          ports: ['3000:3000'],
+          volumes: [
+            './apps/example-app:/app/apps/example-app',
+            './packages:/app/packages',
+          ],
+          restart: 'unless-stopped',
+        },
+        profileOverrides: {
+          production: {
+            build: { context: '.', dockerfile: 'docker/Dockerfile.nextprod' },
+            volumes: [],
+          },
+        },
+      },
+      includeVars: ['networking'],
+      vars: {
+        PORT: '${example-app.PORT}',
+        NODE_ENV: '${example-app.NODE_ENV}',
+      },
+      defaults: {
+        PORT: '3000',
+        NODE_ENV: 'development',
+      },
+    }, null, 2) + '\n');
+    console.log(chalk.green(`  created ${envDir}/contracts/example-app.contract.json`));
+    console.log(chalk.dim('    → rename and customize for your actual app'));
+  }
+
+  // Update ce.json defaultProfile to local
+  saveConfig(cwd, { defaultProfile: 'local' });
+  console.log(chalk.green('  updated ce.json defaultProfile → local'));
 }
 
 function scaffoldExamples(
