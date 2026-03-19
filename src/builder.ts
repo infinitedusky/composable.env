@@ -474,6 +474,7 @@ export class EnvironmentBuilder {
             vars: serviceVars,
             config: contract.target.config,
             profileName,
+            profileOverrides: contract.target.profileOverrides,
           });
         }
       }

@@ -16,6 +16,7 @@ export interface ComposeServiceEntry {
 
 export interface ComposeMultiProfileEntry extends ComposeServiceEntry {
   profileName: string;
+  profileOverrides?: Record<string, Record<string, unknown>>;
 }
 
 export interface ComposeWriteResult {
@@ -74,6 +75,9 @@ export async function writeMultiProfileComposeFile(
   // Track var origins for collision detection (per profile)
   const varOrigins = new Map<string, Map<string, Map<string, { value: string; contract: string }>>>();
 
+  // Collect profileOverrides per service (merged from all contracts targeting it)
+  const serviceProfileOverrides = new Map<string, Record<string, Record<string, unknown>>>();
+
   for (const entry of entries) {
     const { contractName, serviceName, profileName, vars, config } = entry;
 
@@ -104,6 +108,17 @@ export async function writeMultiProfileComposeFile(
         } else {
           data.config[key] = value;
         }
+      }
+    }
+
+    // Collect profileOverrides
+    if (entry.profileOverrides) {
+      if (!serviceProfileOverrides.has(serviceName)) {
+        serviceProfileOverrides.set(serviceName, {});
+      }
+      const existing = serviceProfileOverrides.get(serviceName)!;
+      for (const [profile, overrides] of Object.entries(entry.profileOverrides)) {
+        existing[profile] = { ...(existing[profile] || {}), ...overrides };
       }
     }
 
@@ -237,13 +252,23 @@ export async function writeMultiProfileComposeFile(
           variantNode.add(doc.createPair(key, doc.createNode(value)));
         }
 
+        // Apply profileOverrides for this profile (shallow merge per key, overrides anchor)
+        const overrides = serviceProfileOverrides.get(serviceName)?.[profileName];
+        if (overrides) {
+          for (const [key, value] of Object.entries(overrides)) {
+            if (key === 'environment' || key === 'container_name') continue;
+            variantNode.add(doc.createPair(key, doc.createNode(value)));
+          }
+        }
+
         // Add environment
         if (Object.keys(data.vars).length > 0) {
           variantNode.add(doc.createPair('environment', doc.createNode(data.vars)));
         }
 
-        // Track for volume/network detection
-        allServicesFlat[variantName] = { ...data.config, environment: data.vars };
+        // Track for volume/network detection (apply overrides to flat representation too)
+        const flatConfig = { ...data.config, ...(overrides || {}), environment: data.vars };
+        allServicesFlat[variantName] = flatConfig;
 
         addToServices(docContents, variantName, variantNode);
       }

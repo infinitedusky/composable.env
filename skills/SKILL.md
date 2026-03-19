@@ -328,6 +328,44 @@ Every service is always profiled — names are always `{service}-{profile}` (e.g
 
 `ce build` (no profile flag) writes `.env.{profile}` for every profile. `ce build --profile X` writes only `.env.X` but the compose file still includes all profiles.
 
+### profileOverrides — per-profile Docker config
+
+When local and production need different Docker config (volumes, command, Dockerfile), use `profileOverrides` on the target:
+
+```json
+{
+  "name": "poker",
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "poker",
+    "config": {
+      "build": { "context": ".", "dockerfile": "docker/Dockerfile.nextdev" },
+      "ports": ["3666:3666"],
+      "volumes": ["./apps/poker:/app/apps/poker"],
+      "command": "@numero/poker",
+      "restart": "unless-stopped"
+    },
+    "profileOverrides": {
+      "production": {
+        "volumes": []
+      },
+      "staging": {
+        "build": { "context": ".", "dockerfile": "docker/Dockerfile.nextprod" },
+        "volumes": []
+      }
+    }
+  },
+  "vars": { "PORT": "${poker.PORT}" }
+}
+```
+
+- `config` is the base — goes into the `x-` YAML anchor
+- `profileOverrides` keys are profile names, values are partial config overrides
+- Merge is **shallow per top-level key**: `"volumes": []` replaces the entire array, not appends
+- Keys not mentioned in the override are inherited from the base via `<<: *anchor`
+- Use cases: remove volume mounts in production, different Dockerfile per profile, different command (`next dev` vs `next start`)
+
 Key points:
 - docker-compose.yml is fully generated — no template, no hand-editing
 - `config` handles everything Docker Compose supports: image, build, ports, volumes, healthchecks, deploy, networks, etc.

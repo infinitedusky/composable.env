@@ -25,6 +25,7 @@ export interface ContractTarget {
   file: string;              // Path to file (e.g., "docker-compose.yml")
   service: string;           // Service name within the file
   config?: Record<string, unknown>;  // Service config (image, ports, volumes, etc.)
+  profileOverrides?: Record<string, Record<string, unknown>>;  // Per-profile config overrides (shallow merge per key)
 }
 
 export interface ServiceContract {
