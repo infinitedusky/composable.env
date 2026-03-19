@@ -16,8 +16,7 @@
     }
   },
   "bin": {
-    "ce": "dist/cli/index.js",
-    "cenv": "dist/cli/index.js"
+    "ce": "dist/cli/index.js"
   },
   "files": [
     "dist/",

@@ -24,7 +24,7 @@ ce solves this by separating **what values exist** (components) from **who needs
 ### Setup
 
 ```bash
-# Install composable.env (provides `ce` and `cenv` CLI commands)
+# Install composable.env (provides the `ce` CLI command)
 pnpm add -D composable.env
 
 # Scaffold the env directory and ce.json
