@@ -193,11 +193,27 @@ secrets (.env.secrets.shared + .env.secrets.local)
 ```json
 {
   "envDir": "env",
-  "defaultProfile": "local"
+  "defaultProfile": "local",
+  "profiles": {
+    "local": {
+      "suffix": "-local",
+      "domain": "myproject.orb.local"
+    },
+    "production": {
+      "suffix": "",
+      "domain": "myproject.com",
+      "override": {
+        "admin": { "suffix": "", "domain": "admin.myproject.com" }
+      }
+    }
+  }
 }
 ```
 
-Profile resolution: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultProfile` > `"default"`
+- `envDir` — custom env directory (default: `"env"`)
+- `defaultProfile` — default when no `--profile` flag
+- `profiles` — per-profile config: `suffix` (compose service name suffix), `domain` (for auto-generated `${service.*}` vars), `override` (per-service suffix/domain overrides)
+- Profile resolution: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultProfile` > `"default"`
 
 ## Contract format
 
@@ -348,7 +364,7 @@ Every service is always profiled — names are always `{service}-{suffix}` (e.g.
 
 **Hostnames are a component concern.** ce does not rewrite environment values to add profile suffixes — that's handled by the `networking.env` component. If a service needs to reference another service's profiled hostname, build it in the component using `${networking.PROFILE_SUFFIX}`:
 
-> **Breaking change note (v1.8):** Prior to v1.8, ce automatically scanned all environment values in Docker Compose target output and rewrote any value matching a service name to include the profile suffix (e.g., `redis` → `redis-local`). This was removed because it caused false rewrites — values like `NEO4J_USERNAME=neo4j` were rewritten to `neo4j-local` because `neo4j` matched a service name. The rewriting could not reliably distinguish hostnames from other values. If you are upgrading from pre-1.8 and your Docker services can no longer reach each other, the fix is to update your service components to build the profiled hostname explicitly using `${networking.PROFILE_SUFFIX}` (see "Service networking convention" in best practices below). `depends_on` rewriting is unaffected — ce still rewrites those to match profiled service names.
+> **Breaking change note (v1.8):** Prior to v1.8, ce automatically scanned all environment values in Docker Compose target output and rewrote any value matching a service name to include the profile suffix (e.g., `redis` → `redis-local`). This was removed because it caused false rewrites — values like `NEO4J_USERNAME=neo4j` were rewritten to `neo4j-local` because `neo4j` matched a service name. The replacement is auto-generated `${service.<name>.host}` and `${service.<name>.address}` vars — configure `domain` in your `ce.json` profiles and reference these explicitly in components. See "Service networking with auto-generated vars" in best practices. `depends_on` rewriting is unaffected — ce still rewrites those to match profiled service names.
 
 ```ini
 # networking.env
@@ -508,50 +524,51 @@ URL=postgresql://${postgres.USER}:${postgres.PASSWORD}@${postgres.HOST}:${postgr
 
 Contracts then reference `${postgres.URL}` — one place to update the format.
 
-### Service networking convention
+### Service networking with auto-generated vars
 
-Each service component should define how to reach it on the network. Use `networking.env` to provide the building blocks (`DOMAIN`, `PROFILE_SUFFIX`), and let each service assemble its own reachable address per profile.
+When `ce.json` has profile configs with `domain`, ce auto-generates a `service` pseudo-component with networking vars for every service that has a Docker Compose `target`. These are available as `${service.<name>.<property>}` in any component or contract.
 
-```ini
-# networking.env
-[local]
-DOMAIN=orb.local
-PROJECT=myproject
-PROFILE_SUFFIX=-local
+**ce.json config:**
 
-[production]
-DOMAIN=example.com
-PROJECT=myproject
-PROFILE_SUFFIX=
+```json
+{
+  "profiles": {
+    "local": {
+      "suffix": "-local",
+      "domain": "myproject.orb.local",
+      "override": {
+        "admin": { "suffix": "" }
+      }
+    },
+    "production": {
+      "suffix": "",
+      "domain": "myproject.com"
+    }
+  }
+}
 ```
 
+**Auto-generated vars** (for a `game-server` service in `local` profile):
+
+| Reference | Resolves to | Description |
+|-----------|-------------|-------------|
+| `${service.game-server.host}` | `game-server-local` | Container name (service + suffix) |
+| `${service.game-server.address}` | `game-server-local.myproject.orb.local` | Full reachable address |
+| `${service.game-server.suffix}` | `-local` | Profile suffix |
+| `${service.game-server.domain}` | `myproject.orb.local` | Domain for this profile |
+
+**Usage in components:**
+
 ```ini
-# redis.env
+# game-server.env
 [default]
-PORT=6379
-ENDPOINT=redis${networking.PROFILE_SUFFIX}.${networking.PROJECT}.${networking.DOMAIN}
-URL=redis://${redis.ENDPOINT}:${redis.PORT}
-
-[production]
-ENDPOINT=redis.${networking.PROJECT}.${networking.DOMAIN}
-URL=redis://${redis.ENDPOINT}:${redis.PORT}
+PORT=3665
+URL=http://${service.game-server.address}:${game-server.PORT}
 ```
 
-```ini
-# postgres.env
-[default]
-PORT=5432
-USERNAME=postgres
-ENDPOINT=postgres${networking.PROFILE_SUFFIX}.${networking.PROJECT}.${networking.DOMAIN}
-URL=postgresql://${postgres.USERNAME}:${secrets.DB_PASSWORD}@${postgres.ENDPOINT}:${postgres.PORT}/myapp
+**Per-service overrides:** The `override` map lets specific services have different suffixes or domains. In the example above, `admin` has no suffix in local — `${service.admin.host}` resolves to `admin`, not `admin-local`.
 
-[production]
-ENDPOINT=db.${networking.PROJECT}.${networking.DOMAIN}
-```
-
-Any contract that needs to reach Redis references `${redis.URL}` or `${redis.ENDPOINT}`. It doesn't know about suffixes, domains, or networking — the component handles that per profile.
-
-This is a convention, not ce magic. ce does not rewrite environment values. Each component is responsible for defining how to reach itself in every environment.
+Components can still override service vars by defining the same key explicitly — the auto-generated values are defaults that components and contracts build on top of.
 
 ## Anti-patterns to watch for
 

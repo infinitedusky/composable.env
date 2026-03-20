@@ -8,6 +8,7 @@ import {
   EnvironmentConfig,
   BuildResult,
   DockerServiceConfig,
+  CeProfileConfig,
 } from './types.js';
 import { ContractManager, isNewFormatContract } from './contracts.js';
 import {
@@ -334,7 +335,11 @@ export class EnvironmentBuilder {
    *                     If omitted, write .env files for ALL profiles.
    *                     The compose file always includes all profiles regardless.
    */
-  async buildAllProfiles(envProfile?: string, profileSuffixes?: Record<string, string>): Promise<BuildResult> {
+  async buildAllProfiles(
+    envProfile?: string,
+    profileSuffixes?: Record<string, string>,
+    profileConfigs?: Record<string, CeProfileConfig>
+  ): Promise<BuildResult> {
     await this.initialize();
 
     const allComponents = this.discoverComponents();
@@ -400,6 +405,18 @@ export class EnvironmentBuilder {
 
       if (useNewFormat) {
         componentPool = await this.loadScopedComponentPool(mergedComponents, profileName);
+
+        // Inject service.* pseudo-component with auto-generated vars
+        const profileConfig = profileConfigs?.[profileName];
+        if (profileConfig) {
+          const serviceVars = this.generateServiceVars(
+            availableContracts, profileName, profileConfig
+          );
+          if (Object.keys(serviceVars).length > 0) {
+            componentPool.set('service', serviceVars);
+          }
+        }
+
         flatPool = this.flattenComponentPool(componentPool);
       } else {
         flatPool = await this.loadFlatComponentPool(mergedComponents);
@@ -508,6 +525,41 @@ export class EnvironmentBuilder {
       envPath: generatedFiles.join(', '),
       warnings: warnings.length > 0 ? warnings : undefined,
     };
+  }
+
+  /**
+   * Generate service.* pseudo-variables for all target contracts.
+   * For each service: host, address, suffix, domain.
+   * Keys are dotted: "game-server.host", "game-server.address", etc.
+   */
+  private generateServiceVars(
+    contracts: Map<string, import('./contracts.js').ServiceContract>,
+    profileName: string,
+    profileConfig: CeProfileConfig
+  ): Record<string, string> {
+    const vars: Record<string, string> = {};
+    const defaultSuffix = profileConfig.suffix;
+    const defaultDomain = profileConfig.domain || '';
+
+    for (const [, contract] of contracts) {
+      if (!contract.target) continue;
+      const svcName = contract.target.service;
+
+      // Per-service overrides from ce.json
+      const svcOverride = profileConfig.override?.[svcName];
+      const suffix = svcOverride?.suffix ?? defaultSuffix;
+      const domain = svcOverride?.domain ?? defaultDomain;
+
+      const host = `${svcName}${suffix}`;
+      const address = domain ? `${host}.${domain}` : host;
+
+      vars[`${svcName}.host`] = host;
+      vars[`${svcName}.address`] = address;
+      vars[`${svcName}.suffix`] = suffix;
+      vars[`${svcName}.domain`] = domain;
+    }
+
+    return vars;
   }
 
   /**

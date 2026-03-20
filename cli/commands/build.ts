@@ -36,7 +36,7 @@ export function registerBuildCommand(program: Command): void {
           const profileSuffixes = config.profiles
             ? Object.fromEntries(Object.entries(config.profiles).map(([name, cfg]) => [name, cfg.suffix]))
             : undefined;
-          result = await builder.buildAllProfiles(explicitProfile, profileSuffixes);
+          result = await builder.buildAllProfiles(explicitProfile, profileSuffixes, config.profiles);
         } else {
           console.log(chalk.blue(`Building from profile: ${profile}`));
           result = await builder.buildFromProfile(profile);

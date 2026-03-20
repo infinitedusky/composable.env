@@ -93,8 +93,15 @@ export const CeScriptsConfigSchema = z.object({
 
 export type CeScriptsConfig = z.infer<typeof CeScriptsConfigSchema>;
 
+export const CeServiceOverrideSchema = z.object({
+  suffix: z.string().optional(),
+  domain: z.string().optional(),
+}).strict();
+
 export const CeProfileConfigSchema = z.object({
   suffix: z.string(),
+  domain: z.string().optional(),
+  override: z.record(z.string(), CeServiceOverrideSchema).optional(),
 }).strict();
 
 export type CeProfileConfig = z.infer<typeof CeProfileConfigSchema>;
