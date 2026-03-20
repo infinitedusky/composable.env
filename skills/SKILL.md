@@ -506,6 +506,51 @@ URL=postgresql://${postgres.USER}:${postgres.PASSWORD}@${postgres.HOST}:${postgr
 
 Contracts then reference `${postgres.URL}` — one place to update the format.
 
+### Service networking convention
+
+Each service component should define how to reach it on the network. Use `networking.env` to provide the building blocks (`DOMAIN`, `PROFILE_SUFFIX`), and let each service assemble its own reachable address per profile.
+
+```ini
+# networking.env
+[local]
+DOMAIN=orb.local
+PROJECT=myproject
+PROFILE_SUFFIX=-local
+
+[production]
+DOMAIN=example.com
+PROJECT=myproject
+PROFILE_SUFFIX=
+```
+
+```ini
+# redis.env
+[default]
+PORT=6379
+ENDPOINT=redis${networking.PROFILE_SUFFIX}.${networking.PROJECT}.${networking.DOMAIN}
+URL=redis://${redis.ENDPOINT}:${redis.PORT}
+
+[production]
+ENDPOINT=redis.${networking.PROJECT}.${networking.DOMAIN}
+URL=redis://${redis.ENDPOINT}:${redis.PORT}
+```
+
+```ini
+# postgres.env
+[default]
+PORT=5432
+USERNAME=postgres
+ENDPOINT=postgres${networking.PROFILE_SUFFIX}.${networking.PROJECT}.${networking.DOMAIN}
+URL=postgresql://${postgres.USERNAME}:${secrets.DB_PASSWORD}@${postgres.ENDPOINT}:${postgres.PORT}/myapp
+
+[production]
+ENDPOINT=db.${networking.PROJECT}.${networking.DOMAIN}
+```
+
+Any contract that needs to reach Redis references `${redis.URL}` or `${redis.ENDPOINT}`. It doesn't know about suffixes, domains, or networking — the component handles that per profile.
+
+This is a convention, not ce magic. ce does not rewrite environment values. Each component is responsible for defining how to reach itself in every environment.
+
 ## Anti-patterns to watch for
 
 1. **Never assemble URLs in contracts** — composite values like `DATABASE_URL` belong in the component. Contracts should reference `${database.URL}`, not `${database.PROTOCOL}://${database.USER}@${database.HOST}:${database.PORT}/${database.NAME}`. If 5 contracts all build the same URL inline, that's 5 places to update when the format changes.
