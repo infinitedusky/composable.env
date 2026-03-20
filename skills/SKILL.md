@@ -346,6 +346,11 @@ Switch environments without rebuilding: `docker compose --profile local up` vs `
 
 Every service is always profiled — names are always `{service}-{profile}` (e.g., `redis-local`). No bare `docker compose up`; always use `--profile`. `onlyProfiles` on contracts controls which profiles include that contract. Hostnames in environment values are auto-rewritten to profiled names (`game-server` → `game-server-local`), and `depends_on` references are rewritten to match.
 
+**Hostname rewriting rules:**
+- Values after `://` or `@` in URLs are rewritten (these are hostnames)
+- Exact value matches are rewritten UNLESS the var name ends with `_USERNAME`, `_USER`, `_PASSWORD`, `_NAME`, `_KEY`, `_SECRET`, `_TOKEN`, or `_AUTH` (these are never hostnames)
+- To force a value to be literal (never rewritten), prefix it with `!` in the component: `USERNAME=!neo4j` → outputs `neo4j` without the profile suffix
+
 `ce build` (no profile flag) writes `.env.{profile}` for every profile. `ce build --profile X` writes only `.env.X` but the compose file still includes all profiles.
 
 ### profileOverrides — per-profile Docker config

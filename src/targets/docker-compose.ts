@@ -162,21 +162,42 @@ export async function writeMultiProfileComposeFile(
   // Collect all compose service names for matching
   const allServiceNames = new Set(serviceData.keys());
 
+  // Var name suffixes that are never hostnames — skip exact-match rewriting for these
+  const nonHostnameSuffixes = [
+    '_USERNAME', '_USER', '_PASSWORD', '_PASS', '_AUTH',
+    '_NAME', '_KEY', '_SECRET', '_TOKEN', '_LABEL',
+  ];
+
   for (const [, profileMap] of serviceData) {
     for (const [profileName, data] of profileMap) {
       for (const [key, value] of Object.entries(data.vars)) {
+        // Escape hatch: values prefixed with ! are literal — strip the prefix, skip rewriting
+        if (value.startsWith('!')) {
+          data.vars[key] = value.slice(1);
+          continue;
+        }
+
+        // Check if var name suggests it's not a hostname (for exact-match protection)
+        const upperKey = key.toUpperCase();
+        const isNonHostnameVar = nonHostnameSuffixes.some(s => upperKey.endsWith(s));
+
         let rewritten = value;
         for (const svcName of profiledServices) {
           if (!allServiceNames.has(svcName)) continue;
-          // Match service name only in hostname positions:
+          const escaped = escapeRegex(svcName);
+          const suffix = getProfileSuffix(profileName, profileSuffixes);
+
+          // Match service name in hostname positions:
           // 1. After :// (scheme://hostname)
           // 2. After @ (user@hostname)
-          // 3. Exact value match (HOST=hostname)
           // NOT after / in paths (e.g., /engine is a DB name, not a hostname)
-          const escaped = escapeRegex(svcName);
-          const pattern = new RegExp(`(?<=://)${escaped}(?=[:/?#]|$)|(?<=@)${escaped}(?=[:/?#]|$)|^${escaped}$`, 'g');
-          const suffix = getProfileSuffix(profileName, profileSuffixes);
-          rewritten = rewritten.replace(pattern, `${svcName}${suffix}`);
+          const urlPattern = new RegExp(`(?<=://)${escaped}(?=[:/?#]|$)|(?<=@)${escaped}(?=[:/?#]|$)`, 'g');
+          rewritten = rewritten.replace(urlPattern, `${svcName}${suffix}`);
+
+          // 3. Exact value match (HOST=hostname) — only if var name doesn't suggest non-hostname
+          if (!isNonHostnameVar && rewritten === svcName) {
+            rewritten = `${svcName}${suffix}`;
+          }
         }
         if (rewritten !== value) {
           data.vars[key] = rewritten;
