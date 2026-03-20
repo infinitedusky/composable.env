@@ -541,6 +541,10 @@ export class EnvironmentBuilder {
     const defaultSuffix = profileConfig.suffix;
     const defaultDomain = profileConfig.domain || '';
 
+    // Default entries — profile-level suffix and domain without a specific service
+    vars['default.suffix'] = defaultSuffix;
+    vars['default.domain'] = defaultDomain;
+
     for (const [, contract] of contracts) {
       if (!contract.target) continue;
       const svcName = contract.target.service;
