@@ -88,6 +88,28 @@ pnpm ce build              # builds .env.local in apps/api/
 pnpm ce list               # shows components, profiles, contracts
 ```
 
+### Quick start with Docker scaffold
+
+For Docker-based projects with Next.js and VitePress docs, use the scaffold:
+
+```bash
+pnpm ce init --scaffold docker
+```
+
+This creates everything above plus:
+- `local` and `production` profiles
+- `networking.env` component with OrbStack `.orb.local` DNS setup
+- `networking.vars.json` for shared networking vars across contracts
+- `docker/Dockerfile.nextdev` (hot reload via volume mounts)
+- `docker/Dockerfile.nextprod` (standalone production build)
+- `docker/Dockerfile.vitepressdev` (VitePress hot reload)
+- `docker/Dockerfile.vitepressprod` (VitePress static build with nginx)
+- `apps/docs/` with full VitePress site (config.ts, index.md, guide pages)
+- Example app contract with docker-compose target + `profileOverrides`
+- Docs contract with docker-compose target
+- `docker-compose.yml` added to `.gitignore` (it contains resolved secrets)
+- `ce.json` defaultProfile set to `local`
+
 ## Architecture
 
 - **ce.json** — Optional root config. Sets `envDir` (default `"env"`) and `defaultProfile` (default `"default"`). Scaffolded by `ce init`.
@@ -153,7 +175,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 
 | Command | Purpose |
 |---------|---------|
-| `ce init` | Scaffold env/ directory and ce.json |
+| `ce init` | Scaffold env/ directory and ce.json. `--scaffold docker` adds Docker + Next.js + VitePress setup. |
 | `ce build [profile]` | Build .env files + docker-compose.yml. With `--profile X`: only `.env.X`. Without: all profiles. Compose file always includes all profiles. |
 | `ce start [profile]` | Build + launch PM2 dev environment |
 | `ce list` | Show components, profiles, contracts |
