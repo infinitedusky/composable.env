@@ -1041,8 +1041,14 @@ export class EnvironmentBuilder {
    */
   private flattenComponentPool(pool: Map<string, Record<string, string>>): Record<string, string> {
     const flat: Record<string, string> = {};
-    for (const [, vars] of pool) {
-      Object.assign(flat, vars);
+    for (const [componentName, vars] of pool) {
+      for (const [key, value] of Object.entries(vars)) {
+        // Add both namespaced (component.KEY) and bare (KEY) for resolution.
+        // Namespaced keys allow ${service.redis.host} to resolve in components
+        // via the flat pool's resolveVariables pass.
+        flat[`${componentName}.${key}`] = value;
+        flat[key] = value;
+      }
     }
     return flat;
   }
