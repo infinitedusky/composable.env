@@ -448,7 +448,12 @@ export class EnvironmentBuilder {
 
         // Collect target entries for multi-profile compose
         if (contract.target) {
-          const filePath = contract.target.file;
+          // Persistent contracts go to a separate compose file
+          const baseFilePath = contract.target.file;
+          const filePath = contract.persistent
+            ? baseFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
+            : baseFilePath;
+
           if (!composeGroups.has(filePath)) {
             composeGroups.set(filePath, []);
           }

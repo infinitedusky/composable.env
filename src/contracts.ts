@@ -51,6 +51,7 @@ export interface ServiceContract {
 
   defaults?: Record<string, string>;
   dev?: ServiceDevConfig; // How to run this service locally (for ce start)
+  persistent?: boolean;   // If true, target goes to persistent compose file (survives rebuild cycles)
 }
 
 /**

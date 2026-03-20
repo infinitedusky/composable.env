@@ -185,6 +185,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 | `ce vault get KEY` | Decrypt a secret |
 | `ce migrate` | Convert legacy format to vars format |
 | `ce add-skill` | Install Claude Code skill |
+| `ce persistent up/down/destroy/status` | Manage persistent Docker services (databases, caches) |
 | `ce uninstall` | Remove all ce artifacts |
 
 ## ce.json
@@ -384,6 +385,38 @@ When local and production need different Docker config (volumes, command, Docker
 - Merge is **shallow per top-level key**: `"volumes": []` replaces the entire array, not appends
 - Keys not mentioned in the override are inherited from the base via `<<: *anchor`
 - Use cases: remove volume mounts in production, different Dockerfile per profile, different command (`next dev` vs `next start`)
+
+### Persistent services
+
+Services that should survive rebuild cycles (databases, caches, dev tools) use `"persistent": true` on the contract. They get written to a separate `docker-compose.persistent.yml` instead of the main compose file.
+
+```json
+{
+  "name": "postgres",
+  "persistent": true,
+  "onlyProfiles": ["local"],
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "postgres",
+    "config": {
+      "image": "postgres:16-alpine",
+      "ports": ["5432:5432"],
+      "volumes": ["pgdata:/var/lib/postgresql/data"],
+      "restart": "unless-stopped"
+    }
+  },
+  "vars": { "POSTGRES_PASSWORD": "${secrets.DB_PASSWORD}" }
+}
+```
+
+Persistent is a **local dev concept** — in production, databases are typically managed services or part of the main compose. Use `onlyProfiles` to control which environments use persistent containers.
+
+Manage with:
+- `ce persistent up` — start persistent services (detached)
+- `ce persistent down` — stop (preserves volumes)
+- `ce persistent destroy` — stop and remove volumes
+- `ce persistent status` — show running state
 
 Key points:
 - docker-compose.yml is fully generated — no template, no hand-editing
