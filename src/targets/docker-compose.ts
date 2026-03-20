@@ -156,55 +156,9 @@ export async function writeMultiProfileComposeFile(
   // Even with one profile, redis becomes redis-local. Consistent and predictable.
   const profiledServices = new Set<string>(serviceData.keys());
 
-  // ── Rewrite hostnames: profiled service names in vars get profile suffix ──
-  // e.g., HOST=game-server → game-server-local when building local profile
-  // Only affects target output vars, not .env files.
-  // Collect all compose service names for matching
-  const allServiceNames = new Set(serviceData.keys());
-
-  // Var name suffixes that are never hostnames — skip exact-match rewriting for these
-  const nonHostnameSuffixes = [
-    '_USERNAME', '_USER', '_PASSWORD', '_PASS', '_AUTH',
-    '_NAME', '_KEY', '_SECRET', '_TOKEN', '_LABEL',
-  ];
-
-  for (const [, profileMap] of serviceData) {
-    for (const [profileName, data] of profileMap) {
-      for (const [key, value] of Object.entries(data.vars)) {
-        // Escape hatch: values prefixed with ! are literal — strip the prefix, skip rewriting
-        if (value.startsWith('!')) {
-          data.vars[key] = value.slice(1);
-          continue;
-        }
-
-        // Check if var name suggests it's not a hostname (for exact-match protection)
-        const upperKey = key.toUpperCase();
-        const isNonHostnameVar = nonHostnameSuffixes.some(s => upperKey.endsWith(s));
-
-        let rewritten = value;
-        for (const svcName of profiledServices) {
-          if (!allServiceNames.has(svcName)) continue;
-          const escaped = escapeRegex(svcName);
-          const suffix = getProfileSuffix(profileName, profileSuffixes);
-
-          // Match service name in hostname positions:
-          // 1. After :// (scheme://hostname)
-          // 2. After @ (user@hostname)
-          // NOT after / in paths (e.g., /engine is a DB name, not a hostname)
-          const urlPattern = new RegExp(`(?<=://)${escaped}(?=[:/?#]|$)|(?<=@)${escaped}(?=[:/?#]|$)`, 'g');
-          rewritten = rewritten.replace(urlPattern, `${svcName}${suffix}`);
-
-          // 3. Exact value match (HOST=hostname) — only if var name doesn't suggest non-hostname
-          if (!isNonHostnameVar && rewritten === svcName) {
-            rewritten = `${svcName}${suffix}`;
-          }
-        }
-        if (rewritten !== value) {
-          data.vars[key] = rewritten;
-        }
-      }
-    }
-  }
+  // Hostname rewriting removed — the profile suffix is a networking concern
+  // handled by components (e.g., networking.env defines PROFILE_SUFFIX).
+  // ce does not guess which values are hostnames.
 
   // ── Second pass: emit x- anchors FIRST (must appear before aliases) ──
   // Pre-compute shared configs and depends_on for profiled services
@@ -524,10 +478,6 @@ function getPerProfileConfig(
     }
   }
   return perProfile;
-}
-
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
