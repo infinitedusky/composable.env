@@ -444,6 +444,56 @@ HOST=db.prod.internal
 NAME=myapp
 ```
 
+## Component best practices
+
+### One service, one file
+
+Each component file should represent exactly one logical service or concern. Name it after the service: `postgres.env`, `redis.env`, `auth.env`, `stripe.env`.
+
+**Good:**
+```
+env/components/
+├── postgres.env      # 5-6 keys: HOST, PORT, USER, NAME, URL
+├── redis.env         # 3-4 keys: HOST, PORT, URL
+├── auth.env          # JWT_SECRET, SESSION_TTL, OAUTH_CLIENT_ID
+├── stripe.env        # API_KEY, WEBHOOK_SECRET, PRICE_ID
+└── networking.env    # DOMAIN, PROFILE_SUFFIX, BASE_URL
+```
+
+**Bad:**
+```
+env/components/
+├── services.env      # 40 keys across postgres, redis, auth, stripe...
+└── config.env        # everything else
+```
+
+### Keep files small
+
+The whole point of components is small, focused chunks that are easy to read and compare across profiles. Each file should have a handful of keys — if you can't see `[default]` and `[production]` on the same screen, the file is too big.
+
+When a component has profile sections (`[default]`, `[local]`, `[production]`), you need to be able to quickly scan what differs. A 5-key file makes this trivial. A 40-key file makes it impossible.
+
+### Name files after what they configure, not who uses them
+
+Name components after the service they configure (`postgres.env`), not the app that consumes them (`api-database.env`). Multiple contracts can reference the same component — `${postgres.URL}` works from any contract. If two apps use the same Postgres, they reference the same component.
+
+### Assemble composite values in components
+
+URLs, connection strings, and other composite values should be assembled in the component, not in contracts:
+
+```ini
+# postgres.env
+[default]
+HOST=localhost
+PORT=5432
+USER=${secrets.DB_USER}
+PASSWORD=${secrets.DB_PASSWORD}
+NAME=myapp_dev
+URL=postgresql://${postgres.USER}:${postgres.PASSWORD}@${postgres.HOST}:${postgres.PORT}/${postgres.NAME}
+```
+
+Contracts then reference `${postgres.URL}` — one place to update the format.
+
 ## Anti-patterns to watch for
 
 1. **Never assemble URLs in contracts** — composite values like `DATABASE_URL` belong in the component. Contracts should reference `${database.URL}`, not `${database.PROTOCOL}://${database.USER}@${database.HOST}:${database.PORT}/${database.NAME}`. If 5 contracts all build the same URL inline, that's 5 places to update when the format changes.
