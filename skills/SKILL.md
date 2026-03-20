@@ -348,6 +348,8 @@ Every service is always profiled — names are always `{service}-{suffix}` (e.g.
 
 **Hostnames are a component concern.** ce does not rewrite environment values to add profile suffixes — that's handled by the `networking.env` component. If a service needs to reference another service's profiled hostname, build it in the component using `${networking.PROFILE_SUFFIX}`:
 
+> **Breaking change note (v1.8):** Prior to v1.8, ce automatically scanned all environment values in Docker Compose target output and rewrote any value matching a service name to include the profile suffix (e.g., `redis` → `redis-local`). This was removed because it caused false rewrites — values like `NEO4J_USERNAME=neo4j` were rewritten to `neo4j-local` because `neo4j` matched a service name. The rewriting could not reliably distinguish hostnames from other values. If you are upgrading from pre-1.8 and your Docker services can no longer reach each other, the fix is to update your service components to build the profiled hostname explicitly using `${networking.PROFILE_SUFFIX}` (see "Service networking convention" in best practices below). `depends_on` rewriting is unaffected — ce still rewrites those to match profiled service names.
+
 ```ini
 # networking.env
 [local]
