@@ -2,7 +2,7 @@
 
 ## Overview
 
-composable.env builds `.env` files for every service from reusable **components**, **profiles**, and **contracts**. Think CSS for environment variables — define once, compose everywhere, validate against contracts.
+composable.env builds `.env` files and `docker-compose.yml` for every service from reusable **components**, **profiles**, and **contracts**. Define once, compose everywhere. Version the source of truth, gitignore the outputs.
 
 ## Setup
 
@@ -14,58 +14,67 @@ npm test             # vitest
 
 ## Architecture
 
-### Three building blocks
+### Core building blocks
 
-1. **Components** (`env/components/*.env`) — INI files with named sections (`[default]`, `[production]`, etc.). Reference secrets with `${secrets.KEY}` syntax. Keys are unnamespaced — what you write is what you get.
-2. **Profiles** (`env/profiles/*.json`) — Optional section overrides per environment. Support inheritance via `"extends"`. Components are auto-discovered from `env/components/` — no registry file needed.
-3. **Contracts** (`env/contracts/*.contract.json` or `.contract.ts`) — Declare what variables a service needs via `vars` field with `${component.KEY}` references. Build fails atomically if any required var is unresolvable. Support `defaults` for fallback values and optional `dev` field for `ce start` pane configuration.
+1. **Components** (`env/components/*.env`) — INI files with named sections (`[default]`, `[production]`, etc.). One file per logical service. Reference secrets with `${secrets.KEY}`, other components with `${component.KEY}`.
+2. **Profiles** (`env/profiles/*.json`) — Define environments. Only JSON files create profiles — component sections alone don't. Support inheritance via `"extends"`.
+3. **Contracts** (`env/contracts/*.contract.json`) — Declare what variables a service needs via `vars` with `${component.KEY}` references. Can output to `.env` files (`location`) and/or Docker Compose (`target`).
+4. **Var sets** (`env/contracts/*.vars.json`) — Reusable variable bundles. Contracts inherit via `includeVars`. Support chaining with cycle detection.
 
 ### Secrets layer
 
 | File | Purpose | In git? |
 |------|---------|---------|
-| `env/.env.secrets.shared` | Team secrets, encrypted via vault | Yes |
+| `env/.env.secrets.shared` | Team secrets (optionally encrypted via vault) | Distribute, don't commit |
 | `env/.env.secrets.local` | Personal secret overrides | Never |
 
-Components reference secrets via `${secrets.KEY}`. The secrets pool is loaded and decrypted before component resolution.
+Secrets flow: `secrets → components → contracts → output`. Contracts never reference secrets directly.
 
 ### Resolution chain
 
 ```
-secrets pool: .env.secrets.shared (decrypt CENV_ENC[...]) + .env.secrets.local
-  -> components[default] + components[profile sections]
-    -> Pass 1: resolve ${secrets.KEY} in components
-    -> Pass 2: resolve ${component.KEY} cross-references (multi-pass, max 10)
-    -> .env.shared (team values) + .env.local (personal overrides)
-      -> contract vars mapping: ${component.KEY} -> app variable names
-        -> defaults for unresolved vars
-          -> write .env.{profile} files per contract location
+secrets pool: .env.secrets.shared + .env.secrets.local
+  → generate ${service.*} vars from ce.json profiles config
+  → components[default] + components[profile sections]
+    → Pass 1: resolve ${secrets.KEY}
+    → Pass 2: resolve ${component.KEY} cross-refs (multi-pass)
+    → Pass 3: resolve ${service.*} networking refs
+    → .env.local overrides
+      → contract vars mapping
+        → includeVars merge
+        → defaults for unresolved vars
+          → write .env.{profile} per location
+          → write docker-compose.yml per target
 ```
 
-### Value layers
+### Docker Compose targets
 
-| File | Purpose | In git? |
-|------|---------|---------|
-| `env/.env.secrets.shared` | Team secrets (encrypted) | Yes |
-| `env/.env.secrets.local` | Personal secret overrides | Never |
-| `env/.env.shared` | Team-wide non-secret values | Yes |
-| `env/.env.local` | Personal overrides | Never |
+Contracts with `target` fields generate a complete `docker-compose.yml`:
 
-### Legacy format support
+- `target.config` — full Docker service definition (image, ports, volumes, healthchecks)
+- `target.profileOverrides` — per-profile config overrides (different Dockerfile, remove volumes)
+- Multi-profile output with YAML anchors (`x-` blocks + `<<: *anchor` merge)
+- Every service is always profiled (`{name}{suffix}`)
+- `depends_on` rewritten to profiled names automatically
+- Multiple contracts targeting the same service merge additively
+- `persistent: true` routes to `docker-compose.persistent.yml`
 
-Contracts with `required`/`optional`/`secret` fields (v0.5.x format) are auto-detected and still work. The builder checks `isNewFormatContract()` (presence of `vars` field) to route to new or legacy resolution paths. Components with `NAMESPACE=` directives still produce prefixed keys in legacy mode.
+### Service networking
+
+`ce.json` `profiles` config provides `suffix`, `domain`, and per-service `override`. Auto-generates `${service.<name>.host}`, `.address`, `.suffix`, `.domain` vars. Also generates `${service.default.suffix}` and `${service.default.domain}`.
 
 ### ce.json — project config
 
-Optional root config file. `ce init` scaffolds it. All fields have defaults — absence changes nothing.
-
 | Field | Default | Purpose |
 |-------|---------|---------|
-| `envDir` | `"env"` | Path to env directory (relative to project root) |
-| `defaultProfile` | `"default"` | Profile when no `--profile` flag or `CE_PROFILE` set |
+| `envDir` | `"env"` | Path to env directory |
+| `defaultProfile` | `"default"` | Default profile |
+| `profiles` | — | Per-profile suffix, domain, and per-service overrides |
 | `scripts` | — | Script generation config (managed by `ce scripts`) |
 
-Profile resolution: `--profile` > `CE_PROFILE` env var > `ce.json defaultProfile` > `"default"`
+### Legacy format
+
+Contracts with `required`/`optional`/`secret` (v0.5.x) still work. `isNewFormatContract()` routes resolution.
 
 ## Code structure
 
@@ -74,59 +83,59 @@ src/
   index.ts          # Public API exports
   config.ts         # loadConfig/saveConfig — ce.json loader
   builder.ts        # EnvironmentBuilder — core build logic
-  contracts.ts      # ContractManager — validation + variable mapping
+  contracts.ts      # ContractManager — validation, var mapping, includeVars resolution
   types.ts          # Zod schemas + TypeScript types
   markers.ts        # Marker blocks for managed file sections
   vault.ts          # Vault — age encryption, recipient management
+  targets/
+    docker-compose.ts # Docker Compose file generation (multi-profile, anchors, persistent)
   execution/
-    index.ts        # ExecutionManager — PM2 ecosystem generation + process management
-    ecosystem.ts    # PM2 ecosystem config generation from contracts
+    index.ts        # ExecutionManager — PM2 ecosystem generation
+    ecosystem.ts    # PM2 ecosystem config from contracts
 
 cli/
-  index.ts          # Commander program setup, registers all commands
+  index.ts          # Commander program, registers all commands
   commands/
-    build.ts        # ce build --profile <name>
-    init.ts         # ce init [--examples]
+    build.ts        # ce build [--profile]
+    init.ts         # ce init [--scaffold docker]
     list.ts         # ce list
-    migrate.ts      # ce migrate [--dry-run] — legacy to new format
-    run.ts          # ce run --profile <name> -- <command>
-    script.ts       # ce script <name> -c <command>
+    migrate.ts      # ce migrate [--dry-run]
+    run.ts          # ce run [--profile] -- <cmd>
+    script.ts       # ce script/scripts/scripts:sync/scripts:register
     start.ts        # ce start [profile] — PM2 dev environment
-    uninstall.ts    # ce uninstall [--all] [--dry-run]
+    persistent.ts   # ce persistent up/down/destroy/status
+    add-skill.ts    # ce add-skill — install Claude Code skill
+    uninstall.ts    # ce uninstall [--all]
     vault.ts        # ce vault init/set/get/ls/add/remove/recipients
 
 examples/
-  fullstack/        # Multi-service example with components, profiles, contracts
+  fullstack/        # Multi-service .env example
+  docker-compose/   # Docker Compose target example
 ```
 
 ## Conventions
 
 - TypeScript strict mode, ESM (`"type": "module"`)
-- `.js` extensions in imports (TypeScript compiles to JS)
+- `.js` extensions in imports (TS compiles to JS)
 - Commander for CLI, chalk for terminal output, zod for schemas
-- CLI command pattern: `cli/commands/<name>.ts` exports `registerXCommand(program: Command): void`, registered in `cli/index.ts`
-- INI parsing via `ini` package, YAML via `yaml` package
-- Contracts support `.contract.json` (preferred, no transpiler) and `.contract.ts`/`.contract.js` (requires tsx/jiti for TS)
-
-### Planning docs naming
-
-- ADR/Impl planning docs must use: `v{V}-{YYYY-MM-DD}-{N}-{kebab-title}-{adr|impl}.md`
-- New planning docs must start at `v1`
+- `yaml` package for YAML generation (Document API for anchors/aliases)
+- `ini` package for component parsing
+- CLI pattern: `cli/commands/<name>.ts` exports `registerXCommand(program)`, registered in `cli/index.ts`
 
 ## Testing
 
 ```bash
-npm test             # Run vitest
+npm test             # vitest
 npm run typecheck    # tsc --noEmit
 ```
 
 ## Key patterns
 
-- **Marker blocks**: `# ce:start` / `# ce:end` for managed sections in .gitignore etc. See `src/markers.ts`.
-- **ManagedJsonRegistry**: Tracks which JSON keys ce injected (e.g., package.json scripts, turbo.json deps) so `ce uninstall` can cleanly remove them.
-- **Auto-discovery**: All `*.env` files in `env/components/` are auto-discovered. No component registry needed.
-- **Profile inheritance**: Child profiles merge parent section overrides, can selectively override. Circular inheritance is detected.
-- **Atomic validation**: All contracts validated before any files are written. One failure = zero files written.
-- **Component-scoped pool**: New-format builds use `Map<string, Record<string, string>>` keyed by component name. `secrets` is a reserved namespace.
-- **Format detection**: `isNewFormatContract()` checks for `vars` field to route new vs legacy resolution.
-- **Execution addon**: `ce start` generates a PM2 `ecosystem.config.cjs` from contracts with `dev` fields, then launches PM2 with `pm2 start` + `pm2 logs`. Each contract with a `dev` block becomes a PM2 app. Generated `.cjs` files are gitignored.
+- **Marker blocks**: `# ce:start` / `# ce:end` for managed sections in .gitignore etc.
+- **ManagedJsonRegistry**: Tracks injected JSON keys for clean `ce uninstall`.
+- **Auto-discovery**: All `*.env` files in `env/components/` auto-discovered.
+- **Profile inheritance**: Child profiles merge parent overrides. Circular inheritance detected.
+- **Always profiled**: Docker services always get `{name}{suffix}`. No bare `docker compose up`.
+- **Contagious profiling**: `depends_on` references to profiled services cause the depending service to also be profiled.
+- **Atomic validation**: All contracts validated before any files written.
+- **Component-scoped pool**: `Map<string, Record<string, string>>` keyed by component name. `secrets` and `service` are reserved namespaces.
