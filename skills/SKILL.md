@@ -459,6 +459,24 @@ Key points:
 - Contracts with only `target` (no `location`) are skipped by `ce start` PM2
 - See `examples/docker-compose/` for a full working example
 
+## Reverse proxy — nginx config generation
+
+Contracts with `subdomain` on their target auto-generate nginx configs per profile. Requires `domain` in `ce.json` profiles.
+
+```json
+{
+  "target": {
+    "type": "docker-compose",
+    "file": "docker-compose.yml",
+    "service": "portainer",
+    "subdomain": "portainer",
+    "config": { "image": "portainer/portainer-ce:latest", "ports": ["9000:9000"] }
+  }
+}
+```
+
+`ce build` generates `nginx.{profile}.conf` with `server_name portainer.{domain}` proxying to the container port. Includes WebSocket upgrade headers. Auto-gitignored. Deploy by copying to `/etc/nginx/sites-enabled/`.
+
 ## Component format
 
 ```ini

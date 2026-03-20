@@ -17,6 +17,7 @@ import {
   type ComposeServiceEntry,
   type ComposeMultiProfileEntry,
 } from './targets/docker-compose.js';
+import { writeNginxConfigs } from './targets/nginx.js';
 
 export class EnvironmentBuilder {
   private configDir: string;
@@ -516,6 +517,30 @@ export class EnvironmentBuilder {
       const result = await writeMultiProfileComposeFile(filePath, entries, profileNames, profileSuffixes);
       warnings.push(...result.warnings);
       generatedFiles.push(filePath);
+    }
+
+    // Generate nginx configs for profiles with domains and contracts with subdomains
+    if (profileConfigs) {
+      const profileDomains: Record<string, string> = {};
+      for (const [name, config] of Object.entries(profileConfigs)) {
+        if (config.domain) profileDomains[name] = config.domain;
+      }
+      if (Object.keys(profileDomains).length > 0) {
+        const nginxResults = writeNginxConfigs(
+          this.configDir,
+          allContracts,
+          profileNames,
+          profileSuffixes || {},
+          profileDomains,
+        );
+        for (const result of nginxResults) {
+          generatedFiles.push(result.filePath);
+          if (result.warnings.length > 0) {
+            warnings.push(`Nginx routes (${path.basename(result.filePath)}):`);
+            warnings.push(...result.warnings);
+          }
+        }
+      }
     }
 
     warnings.push(`Built ${profileNames.length} profiles: ${profileNames.join(', ')}`);

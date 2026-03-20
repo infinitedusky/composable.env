@@ -26,6 +26,7 @@ export interface ContractTarget {
   service: string;           // Service name within the file
   config?: Record<string, unknown>;  // Service config (image, ports, volumes, etc.)
   profileOverrides?: Record<string, Record<string, unknown>>;  // Per-profile config overrides (shallow merge per key)
+  subdomain?: string;  // Subdomain for reverse proxy (e.g., "portainer" → portainer.domain.com)
 }
 
 export interface ServiceContract {
