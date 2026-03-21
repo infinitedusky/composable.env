@@ -495,9 +495,13 @@ export class EnvironmentBuilder {
             contractName: serviceName,
             serviceName: contract.target.service,
             vars: serviceVars,
-            config: contract.target.config,
+            config: contract.target.config
+              ? this.resolveConfigValues(contract.target.config, resolvedPool)
+              : undefined,
             profileName,
-            profileOverrides: contract.target.profileOverrides,
+            profileOverrides: contract.target.profileOverrides
+              ? this.resolveConfigValues(contract.target.profileOverrides, resolvedPool)
+              : undefined,
           });
         }
       }
@@ -794,7 +798,9 @@ export class EnvironmentBuilder {
             contractName: serviceName,
             serviceName: contract.target.service,
             vars: serviceVars,
-            config: contract.target.config,
+            config: contract.target.config
+              ? this.resolveConfigValues(contract.target.config, resolvedPool)
+              : undefined,
           });
         }
       }
@@ -1302,6 +1308,29 @@ export class EnvironmentBuilder {
     }
 
     return resolved;
+  }
+
+  /**
+   * Deep-resolve ${...} references in an arbitrary object (config, profileOverrides, etc.)
+   * using the resolved variable pool.
+   */
+  private resolveConfigValues<T>(obj: T, pool: Record<string, string>): T {
+    if (typeof obj === 'string') {
+      return obj.replace(/\$\{([^}]+)\}/g, (match, varName) => {
+        return pool[varName] ?? match;
+      }) as unknown as T;
+    }
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.resolveConfigValues(item, pool)) as unknown as T;
+    }
+    if (obj && typeof obj === 'object') {
+      const result: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(obj)) {
+        result[key] = this.resolveConfigValues(value, pool);
+      }
+      return result as T;
+    }
+    return obj;
   }
 
   private validateAllContracts(systemVars: Record<string, string>): {
