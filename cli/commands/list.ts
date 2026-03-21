@@ -4,7 +4,8 @@ import { EnvironmentBuilder, loadConfig } from '../../src/index.js';
 
 export function registerListCommand(program: Command): void {
   program
-    .command('list')
+    .command('profile:list')
+    .alias('p:list')
     .description('List available profiles')
     .action(() => {
       const cwd = process.cwd();

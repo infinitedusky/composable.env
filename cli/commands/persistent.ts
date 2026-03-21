@@ -3,20 +3,23 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { loadConfig } from '../../src/index.js';
+
+function findPersistentFile(cwd: string): string | null {
+  for (const name of ['docker-compose.persistent.yml', 'docker-compose.persistent.yaml']) {
+    if (fs.existsSync(path.join(cwd, name))) {
+      return name;
+    }
+  }
+  return null;
+}
 
 export function registerPersistentCommand(program: Command): void {
-  const persistent = program
-    .command('persistent')
-    .description('Manage persistent Docker services (databases, caches, dev tools)');
-
-  persistent
-    .command('up')
+  program
+    .command('persistent:up')
     .description('Start persistent services (builds first if needed)')
     .option('--profile <name>', 'Docker Compose profile to activate')
     .action(async (options) => {
       const cwd = process.cwd();
-      const config = loadConfig(cwd);
       const persistentFile = findPersistentFile(cwd);
 
       if (!persistentFile) {
@@ -41,8 +44,8 @@ export function registerPersistentCommand(program: Command): void {
       }
     });
 
-  persistent
-    .command('down')
+  program
+    .command('persistent:down')
     .description('Stop persistent services (preserves volumes)')
     .action(async () => {
       const cwd = process.cwd();
@@ -67,8 +70,8 @@ export function registerPersistentCommand(program: Command): void {
       }
     });
 
-  persistent
-    .command('destroy')
+  program
+    .command('persistent:destroy')
     .description('Stop persistent services and remove volumes')
     .action(async () => {
       const cwd = process.cwd();
@@ -93,8 +96,8 @@ export function registerPersistentCommand(program: Command): void {
       }
     });
 
-  persistent
-    .command('status')
+  program
+    .command('persistent:status')
     .description('Show status of persistent services')
     .action(async () => {
       const cwd = process.cwd();
@@ -115,13 +118,4 @@ export function registerPersistentCommand(program: Command): void {
         process.exit(1);
       }
     });
-}
-
-function findPersistentFile(cwd: string): string | null {
-  for (const name of ['docker-compose.persistent.yml', 'docker-compose.persistent.yaml']) {
-    if (fs.existsSync(path.join(cwd, name))) {
-      return name;
-    }
-  }
-  return null;
 }

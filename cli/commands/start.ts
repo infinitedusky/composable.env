@@ -29,7 +29,8 @@ function resolveProfile(
 
 export function registerStartCommand(program: Command): void {
   program
-    .command('start')
+    .command('pm2:start')
+    .alias('start')
     .description('Build env, generate PM2 ecosystem, and launch dev environment')
     .argument('[profile]', 'Profile name')
     .option('-p, --profile [name]', 'Profile name (alternative to positional arg)')

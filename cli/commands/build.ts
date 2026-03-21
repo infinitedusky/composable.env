@@ -4,7 +4,8 @@ import { EnvironmentBuilder, ContractManager, loadConfig } from '../../src/index
 
 export function registerBuildCommand(program: Command): void {
   program
-    .command('build')
+    .command('env:build')
+    .alias('build')
     .description('Build .env files and docker-compose.yml from contracts')
     .option('-p, --profile [name]', 'Profile name (or set CE_PROFILE env var)')
     .option('-o, --output <path>', 'Output path for single-file builds', '.env')

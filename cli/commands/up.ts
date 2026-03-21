@@ -35,7 +35,8 @@ function findComposeFile(cwd: string): string | null {
 
 export function registerUpCommand(program: Command): void {
   program
-    .command('up')
+    .command('dc:up')
+    .alias('up')
     .description('Build env and start Docker Compose services for a profile')
     .argument('[profile]', 'Profile name')
     .option('-p, --profile <name>', 'Profile name (alternative to positional arg)')
@@ -98,7 +99,8 @@ export function registerUpCommand(program: Command): void {
     });
 
   program
-    .command('down')
+    .command('dc:down')
+    .alias('down')
     .description('Stop Docker Compose services for a profile')
     .argument('[profile]', 'Profile name')
     .option('-p, --profile <name>', 'Profile name')
@@ -135,7 +137,8 @@ export function registerUpCommand(program: Command): void {
     });
 
   program
-    .command('logs')
+    .command('dc:logs')
+    .alias('logs')
     .description('Tail Docker Compose logs for a profile')
     .argument('[profile]', 'Profile name')
     .option('-p, --profile <name>', 'Profile name')
@@ -172,7 +175,8 @@ export function registerUpCommand(program: Command): void {
     });
 
   program
-    .command('ps')
+    .command('dc:ps')
+    .alias('ps')
     .description('Show status of Docker Compose services')
     .argument('[profile]', 'Profile name')
     .option('-p, --profile <name>', 'Profile name')
