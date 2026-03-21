@@ -13,6 +13,7 @@ import { registerStartCommand } from './commands/start.js';
 import { registerMigrateCommand } from './commands/migrate.js';
 import { registerAddSkillCommand } from './commands/add-skill.js';
 import { registerPersistentCommand } from './commands/persistent.js';
+import { registerUpCommand } from './commands/up.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json') as { version: string };
@@ -36,5 +37,6 @@ registerStartCommand(program);
 registerMigrateCommand(program);
 registerAddSkillCommand(program);
 registerPersistentCommand(program);
+registerUpCommand(program);
 
 program.parse();
