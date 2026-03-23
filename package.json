@@ -21,7 +21,8 @@
   "files": [
     "dist/",
     "examples/",
-    "skills/"
+    "skills/",
+    "indusk-extension.json"
   ],
   "scripts": {
     "build": "tsc",

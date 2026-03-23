@@ -1,0 +1,31 @@
+{
+  "name": "composable-env",
+  "description": "Docker-based local dev environment via declarative contracts and profiles",
+  "version": "1.0.0",
+  "provides": {
+    "skill": true,
+    "networking": {
+      "description": "Service hostnames from OrbStack DNS — never use localhost port forwarding",
+      "env_file": "apps/*/.env.local"
+    },
+    "services": {
+      "description": "Docker service topology from contracts",
+      "command": "pnpm ce dc:ps --json"
+    },
+    "health_checks": [
+      { "name": "docker-services", "command": "docker compose ps --format json" },
+      { "name": "env-files", "command": "test -f docker-compose.yml" }
+    ],
+    "verification": [
+      { "name": "env-build", "command": "pnpm ce env:build", "detect": { "file": "ce.json" } }
+    ]
+  },
+  "hooks": {
+    "on_init": "pnpm ce add-skill",
+    "on_health_check": "docker compose ps --filter status=running",
+    "on_onboard": "pnpm ce dc:ps"
+  },
+  "detect": {
+    "file": "ce.json"
+  }
+}
