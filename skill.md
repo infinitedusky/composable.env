@@ -84,8 +84,8 @@ DB_PASSWORD=local-dev-password
 ### Build and verify
 
 ```bash
-pnpm ce build              # builds .env.local in apps/api/
-pnpm ce list               # shows components, profiles, contracts
+pnpm ce env:build          # builds .env.local in apps/api/
+pnpm ce profile:list       # shows components, profiles, contracts
 ```
 
 ### Quick start with Docker scaffold
@@ -173,20 +173,26 @@ secrets (.env.secrets.shared + .env.secrets.local)
 
 ## CLI commands
 
-| Command | Purpose |
-|---------|---------|
-| `ce init` | Scaffold env/ directory and ce.json. `--scaffold docker` adds Docker + Next.js + VitePress setup. |
-| `ce build [profile]` | Build .env files + docker-compose.yml. With `--profile X`: only `.env.X`. Without: all profiles. Compose file always includes all profiles. |
-| `ce start [profile]` | Build + launch PM2 dev environment |
-| `ce list` | Show components, profiles, contracts |
-| `ce run [profile] -- <cmd>` | Build then run a command |
-| `ce vault init` | Initialize age-encrypted vault |
-| `ce vault set KEY=VALUE` | Encrypt a secret |
-| `ce vault get KEY` | Decrypt a secret |
-| `ce migrate` | Convert legacy format to vars format |
-| `ce add-skill` | Install Claude Code skill |
-| `ce persistent up/down/destroy/status` | Manage persistent Docker services (databases, caches) |
-| `ce uninstall` | Remove all ce artifacts |
+| Command | Alias | Purpose |
+|---------|-------|---------|
+| `pnpm ce init` | — | Scaffold env/ directory and ce.json. `--scaffold docker` adds Docker + Next.js + VitePress setup. |
+| `pnpm ce env:build` | `pnpm ce build` | Build .env files + docker-compose.yml. With `--profile X`: only `.env.X`. Without: all profiles. Compose file always includes all profiles. |
+| `pnpm ce profile:list` | `pnpm ce p:list` | Show components, profiles, contracts |
+| `pnpm ce pm2:start [profile]` | `pnpm ce start` | Build + launch PM2 dev environment |
+| `pnpm ce dc:up [profile]` | `pnpm ce up` | Build env, then `docker compose --profile X down && up -d --build` |
+| `pnpm ce dc:down [profile]` | `pnpm ce down` | Stop Docker Compose services for a profile |
+| `pnpm ce dc:logs [profile]` | `pnpm ce logs` | Tail Docker Compose logs (`--service X` for one service) |
+| `pnpm ce dc:ps [profile]` | `pnpm ce ps` | Show Docker Compose service status |
+| `pnpm ce persistent:up` | — | Start persistent services (detached) |
+| `pnpm ce persistent:down` | — | Stop persistent services (preserves volumes) |
+| `pnpm ce persistent:destroy` | — | Stop persistent services and remove volumes |
+| `pnpm ce persistent:status` | — | Show persistent service status |
+| `pnpm ce vault init` | — | Initialize age-encrypted vault |
+| `pnpm ce vault set KEY=VALUE` | — | Encrypt a secret |
+| `pnpm ce vault get KEY` | — | Decrypt a secret |
+| `pnpm ce migrate` | — | Convert legacy format to vars format |
+| `pnpm ce add-skill` | — | Install Claude Code skill |
+| `pnpm ce uninstall` | — | Remove all ce artifacts |
 
 ## ce.json
 
@@ -241,7 +247,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 - Right side = **always** a `${component.KEY}` reference. Contracts only reference components, never secrets directly. Secrets flow through components (`${secrets.KEY}` in a component, `${component.KEY}` in a contract).
 - `defaults` is the **only** place for hardcoded values in a contract — static fallbacks like `LOG_LEVEL=info`. Everything in `vars` should be a `${component.KEY}` reference so values vary by profile.
 - `defaults` provides fallbacks for unresolvable vars
-- `dev` defines how `ce start` runs this service via PM2
+- `dev` defines how `pnpm ce pm2:start` runs this service via PM2
 - `onlyProfiles` — optional array of ce profile names. If set, the contract is only included when building one of those profiles. Useful for dev-only services (log aggregators, debug tools) that shouldn't exist in production builds
 - `includeVars` — array of var set names to inherit. Resolves `*.vars.json` files from `env/contracts/`. Merged left-to-right, contract's own vars win on conflict
 
@@ -326,7 +332,7 @@ Multiple contracts targeting the same service are **additive** — both `config`
 
 ### Multi-profile compose output
 
-When `ce build` detects target contracts, it builds **all profiles** (from `env/profiles/*.json` — not component sections) into one compose file. Shared Docker config (image, ports, volumes) goes into `x-` YAML anchor blocks. Per-profile variants use `<<: *anchor` merge and Docker Compose `profiles:` arrays:
+When `pnpm ce env:build` detects target contracts, it builds **all profiles** (from `env/profiles/*.json` — not component sections) into one compose file. Shared Docker config (image, ports, volumes) goes into `x-` YAML anchor blocks. Per-profile variants use `<<: *anchor` merge and Docker Compose `profiles:` arrays:
 
 ```yaml
 x-app: &app-base
@@ -358,7 +364,7 @@ services:
     environment: {}
 ```
 
-Switch environments without rebuilding: `docker compose --profile local up` vs `docker compose --profile production up`.
+Switch environments without rebuilding: `pnpm ce dc:up local` vs `pnpm ce dc:up production`.
 
 Every service is always profiled — names are always `{service}-{suffix}` (e.g., `redis-local`). No bare `docker compose up`; always use `--profile`. `onlyProfiles` on contracts controls which profiles include that contract, and `depends_on` references are rewritten to match profiled service names.
 
@@ -376,7 +382,7 @@ PROFILE_SUFFIX=-local
 HOST=game-server${networking.PROFILE_SUFFIX}
 ```
 
-`ce build` (no profile flag) writes `.env.{profile}` for every profile. `ce build --profile X` writes only `.env.X` but the compose file still includes all profiles.
+`pnpm ce env:build` (no profile flag) writes `.env.{profile}` for every profile. `pnpm ce env:build --profile X` writes only `.env.X` but the compose file still includes all profiles.
 
 ### profileOverrides — per-profile Docker config
 
@@ -443,20 +449,20 @@ Services that should survive rebuild cycles (databases, caches, dev tools) use `
 Persistent is a **local dev concept** — in production, databases are typically managed services or part of the main compose. Use `onlyProfiles` to control which environments use persistent containers.
 
 Manage with:
-- `ce persistent up` — start persistent services (detached)
-- `ce persistent down` — stop (preserves volumes)
-- `ce persistent destroy` — stop and remove volumes
-- `ce persistent status` — show running state
+- `pnpm ce persistent:up` — start persistent services (detached)
+- `pnpm ce persistent:down` — stop (preserves volumes)
+- `pnpm ce persistent:destroy` — stop and remove volumes
+- `pnpm ce persistent:status` — show running state
 
 Key points:
 - docker-compose.yml is fully generated — no template, no hand-editing
 - `config` handles everything Docker Compose supports: image, build, ports, volumes, healthchecks, deploy, networks, etc.
-- `environment:` block contains resolved secrets → `ce build` auto-adds the file to `.gitignore`
-- If the compose file already exists but wasn't generated by ce, build errors out — delete or rename it first
+- `environment:` block contains resolved secrets → `pnpm ce env:build` auto-adds the file to `.gitignore`
+- If the compose file already exists but wasn't generated by ce, `pnpm ce env:build` errors out — delete or rename it first
 - Named volumes and networks are auto-detected from service configs and emitted as top-level blocks
-- If multiple contracts write conflicting values for the same var on the same service, ce warns
+- If multiple contracts write conflicting values for the same var on the same service, `pnpm ce env:build` warns
 - Target vars are **runtime-only** — injected when the container starts, never baked into the Docker image
-- Contracts with only `target` (no `location`) are skipped by `ce start` PM2
+- Contracts with only `target` (no `location`) are skipped by `pnpm ce pm2:start`
 - See `examples/docker-compose/` for a full working example
 
 ## Reverse proxy — nginx config generation
@@ -475,7 +481,7 @@ Contracts with `subdomain` on their target auto-generate nginx configs per profi
 }
 ```
 
-`ce build` generates `nginx.{profile}.conf` with `server_name portainer.{domain}` proxying to the container port. Includes WebSocket upgrade headers. Auto-gitignored. Deploy by copying to `/etc/nginx/sites-enabled/`.
+`pnpm ce env:build` generates `nginx.{profile}.conf` with `server_name portainer.{domain}` proxying to the container port. Includes WebSocket upgrade headers. Auto-gitignored. Deploy by copying to `/etc/nginx/sites-enabled/`.
 
 ## Component format
 
@@ -598,17 +604,19 @@ Components can still override service vars by defining the same key explicitly �
 6. **Document all secrets for onboarding** — if a secret exists only in `.env.secrets.local` with no counterpart in `.env.secrets.shared`, new developers can't build without manual setup. Every team secret should be in `.env.secrets.shared` (or the vault), with `.env.secrets.local` only for personal overrides.
 7. **Don't leave deploy-time values blank** — if a component has keys like `DIAMOND_ADDRESS=` that must be populated after a deploy, document this in the component file with a comment and consider a post-deploy script that writes to the component or vault.
 8. **Don't manually source env in Docker** — use a `target` contract to write vars into docker-compose.yml's `environment:` block. Don't copy composable.env into the container or source .env files in entrypoints — that risks baking secrets into image layers. The `target` approach keeps secrets at runtime only.
-9. **Don't hand-edit generated docker-compose.yml** — the compose file is a build artifact generated by `ce build`. If you need to change service config, update the contract's `target.config`. If you need to change env vars, update the contract's `vars` or the underlying component. `ce build` auto-gitignores the file since it contains secrets.
+9. **Don't hand-edit generated docker-compose.yml** — the compose file is a build artifact generated by `pnpm ce env:build`. If you need to change service config, update the contract's `target.config`. If you need to change env vars, update the contract's `vars` or the underlying component. `pnpm ce env:build` auto-gitignores the file since it contains secrets.
 
 ## When helping the user
 
-1. **Scaffolding**: Use `ce init` for new projects. It creates `ce.json` and the directory structure.
-2. **Debugging builds**: Run `ce build` and read error output. Missing vars usually mean a component is missing a key or a contract reference is wrong.
+1. **Scaffolding**: Use `pnpm ce init` for new projects. It creates `ce.json` and the directory structure.
+2. **Debugging builds**: Run `pnpm ce env:build` and read error output. Missing vars usually mean a component is missing a key or a contract reference is wrong.
 3. **Adding a service**: Create a `.contract.json` with `vars` mapping what the service needs to component keys.
 4. **Adding a component**: Create a `.env` file in `env/components/` with `[default]` section. It's auto-discovered.
-5. **Secrets**: Use `ce vault set KEY=VALUE` to encrypt. Reference with `${secrets.KEY}` in components — never in contracts directly.
+5. **Secrets**: Use `pnpm ce vault set KEY=VALUE` to encrypt. Reference with `${secrets.KEY}` in components — never in contracts directly.
 6. **Cross-component refs**: Components can reference each other: `${database.HOST}` in a component resolves from the database component.
 7. **Custom env dir**: Set `envDir` in `ce.json` if the project doesn't use the default `env/` path.
 8. **Default profile**: Set `defaultProfile` in `ce.json` so the team doesn't need `--profile` on every command.
 9. **Deciding where a value goes**: Is it secret? → `.env.secrets.shared`. Is it personal? → `.env.secrets.local` or `.env.local`. Is it neither? → directly in a component file (versioned).
 10. **Docker Compose services**: Use `target` instead of `location` in the contract. Set `type: "docker-compose"`, point `file` to the compose file, and `service` to the service name. Gitignore the compose file since it will contain resolved secrets.
+11. **Starting Docker services**: Use `pnpm ce dc:up local` (builds env, then docker compose down + up --build). Use `pnpm ce dc:logs local` to tail logs, `pnpm ce dc:ps local` for status.
+12. **Persistent services**: Use `pnpm ce persistent:up` to start databases/caches, `pnpm ce persistent:status` to check them.
