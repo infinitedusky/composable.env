@@ -22,7 +22,8 @@
     "dist/",
     "examples/",
     "skills/",
-    "indusk-extension.json"
+    "indusk-extension.json",
+    "skill.md"
   ],
   "scripts": {
     "build": "tsc",
