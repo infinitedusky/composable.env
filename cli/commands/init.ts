@@ -142,8 +142,10 @@ export function registerInitCommand(program: Command): void {
       // Scaffold a complete project template
       if (options.scaffold === 'docker') {
         scaffoldDocker(cwd, envDir);
-      } else if (options.scaffold && options.scaffold !== 'docker') {
-        console.log(chalk.yellow(`  Unknown scaffold type: ${options.scaffold}. Available: docker`));
+      } else if (options.scaffold === 'vitepress') {
+        scaffoldVitepress(cwd, envDir);
+      } else if (options.scaffold && !['docker', 'vitepress'].includes(options.scaffold)) {
+        console.log(chalk.yellow(`  Unknown scaffold type: ${options.scaffold}. Available: docker, vitepress`));
       }
 
       console.log('');
@@ -153,6 +155,10 @@ export function registerInitCommand(program: Command): void {
         console.log(`  2. Add secrets to ${envDir}/.env.secrets.shared`);
         console.log('  3. Run: pnpm ce env:build');
         console.log('  4. Run: pnpm ce dc:up local');
+      } else if (options.scaffold === 'vitepress') {
+        console.log('  1. Run: pnpm install');
+        console.log('  2. Run: pnpm --filter @project/docs dev');
+        console.log('  3. Edit apps/docs/ to customize your documentation');
       } else {
         console.log(`  1. Add component files to ${envDir}/components/  (auto-discovered)`);
         console.log(`  2. Add profiles to ${envDir}/profiles/  (optional overrides)`);
@@ -368,7 +374,116 @@ function scaffoldDocker(cwd: string, envDir: string): void {
     console.log(chalk.dim('    → rename and customize for your actual app'));
   }
 
-  // ── VitePress docs app ──
+  // ── VitePress (reuse standalone scaffold) ──
+  scaffoldVitepress(cwd, envDir);
+
+  // VitePress Dockerfile for dev (hot reload)
+  const dockerfileVitepressDevPath = path.join(dockerDir, 'Dockerfile.vitepressdev');
+  if (!fs.existsSync(dockerfileVitepressDevPath)) {
+    fs.writeFileSync(dockerfileVitepressDevPath,
+      '# VitePress local development — hot reload via volume mounts\n' +
+      'FROM node:20-alpine\n' +
+      '\n' +
+      'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
+      '\n' +
+      'WORKDIR /app\n' +
+      '\n' +
+      'COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\n' +
+      'RUN pnpm install --frozen-lockfile\n' +
+      '\n' +
+      '# Entrypoint bypasses turbo — env vars pass through\n' +
+      'COPY docker/app-entrypoint.sh /usr/local/bin/app-entrypoint.sh\n' +
+      '\n' +
+      '# Source comes from volume mounts\n' +
+      'EXPOSE 5173\n' +
+      'ENTRYPOINT ["/usr/local/bin/app-entrypoint.sh"]\n'
+    );
+    console.log(chalk.green('  created docker/Dockerfile.vitepressdev'));
+  }
+
+  // VitePress Dockerfile for production (static build + nginx)
+  const dockerfileVitepressProdPath = path.join(dockerDir, 'Dockerfile.vitepressprod');
+  if (!fs.existsSync(dockerfileVitepressProdPath)) {
+    fs.writeFileSync(dockerfileVitepressProdPath,
+      '# VitePress production — static build served by nginx\n' +
+      'FROM node:20-alpine AS builder\n' +
+      '\n' +
+      'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
+      '\n' +
+      'WORKDIR /app\n' +
+      'COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\n' +
+      'COPY apps/docs/ ./apps/docs/\n' +
+      'COPY packages/ ./packages/\n' +
+      'RUN pnpm install --frozen-lockfile\n' +
+      'RUN pnpm --filter @project/docs build\n' +
+      '\n' +
+      'FROM nginx:alpine\n' +
+      'COPY --from=builder /app/apps/docs/.vitepress/dist /usr/share/nginx/html\n' +
+      'EXPOSE 80\n'
+    );
+    console.log(chalk.green('  created docker/Dockerfile.vitepressprod'));
+  }
+
+  // Docs contract with docker-compose target
+  const docsContractPath = path.join(cwd, envDir, 'contracts', 'docs.contract.json');
+  if (!fs.existsSync(docsContractPath)) {
+    fs.writeFileSync(docsContractPath, JSON.stringify({
+      name: 'docs',
+      location: 'apps/docs',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'docs',
+        config: {
+          build: { context: '.', dockerfile: 'docker/Dockerfile.vitepressdev' },
+          ports: ['5173:5173'],
+          volumes: [
+            './apps/docs:/app/apps/docs',
+            './packages:/app/packages',
+          ],
+          command: '@project/docs',
+          restart: 'unless-stopped',
+        },
+        profileOverrides: {
+          production: {
+            build: { context: '.', dockerfile: 'docker/Dockerfile.vitepressprod' },
+            command: '',
+            ports: ['80:80'],
+            volumes: [],
+          },
+        },
+      },
+      includeVars: ['networking'],
+      vars: {
+        PORT: '${docs.PORT}',
+      },
+      defaults: {
+        PORT: '5173',
+      },
+    }, null, 2) + '\n');
+    console.log(chalk.green(`  created ${envDir}/contracts/docs.contract.json`));
+  }
+
+  // ── Add docker-compose.yml to .gitignore ──
+  const gitignorePath = path.join(cwd, '.gitignore');
+  if (fs.existsSync(gitignorePath)) {
+    let content = fs.readFileSync(gitignorePath, 'utf8');
+    if (!content.includes('docker-compose.yml')) {
+      content += '\n# Generated by ce build (contains resolved secrets)\ndocker-compose.yml\ndocker-compose.persistent.yml\n';
+      fs.writeFileSync(gitignorePath, content);
+      console.log(chalk.green('  updated .gitignore — added docker-compose.yml + docker-compose.persistent.yml'));
+    }
+  }
+
+  // Update ce.json defaultProfile to local
+  saveConfig(cwd, { defaultProfile: 'local' });
+  console.log(chalk.green('  updated ce.json defaultProfile → local'));
+}
+
+function scaffoldVitepress(cwd: string, envDir: string): void {
+  console.log('');
+  console.log(chalk.blue('Scaffolding VitePress docs app...'));
+
   const docsDir = path.join(cwd, 'apps', 'docs');
   if (!fs.existsSync(docsDir)) {
     fs.mkdirSync(docsDir, { recursive: true });
@@ -489,108 +604,6 @@ function scaffoldDocker(cwd: string, envDir: string): void {
     );
     console.log(chalk.green('  created apps/docs/guide/architecture.md'));
   }
-
-  // VitePress Dockerfile for dev (hot reload)
-  const dockerfileVitepressDevPath = path.join(dockerDir, 'Dockerfile.vitepressdev');
-  if (!fs.existsSync(dockerfileVitepressDevPath)) {
-    fs.writeFileSync(dockerfileVitepressDevPath,
-      '# VitePress local development — hot reload via volume mounts\n' +
-      'FROM node:20-alpine\n' +
-      '\n' +
-      'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
-      '\n' +
-      'WORKDIR /app\n' +
-      '\n' +
-      'COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\n' +
-      'RUN pnpm install --frozen-lockfile\n' +
-      '\n' +
-      '# Entrypoint bypasses turbo — env vars pass through\n' +
-      'COPY docker/app-entrypoint.sh /usr/local/bin/app-entrypoint.sh\n' +
-      '\n' +
-      '# Source comes from volume mounts\n' +
-      'EXPOSE 5173\n' +
-      'ENTRYPOINT ["/usr/local/bin/app-entrypoint.sh"]\n'
-    );
-    console.log(chalk.green('  created docker/Dockerfile.vitepressdev'));
-  }
-
-  // VitePress Dockerfile for production (static build + nginx)
-  const dockerfileVitepressProdPath = path.join(dockerDir, 'Dockerfile.vitepressprod');
-  if (!fs.existsSync(dockerfileVitepressProdPath)) {
-    fs.writeFileSync(dockerfileVitepressProdPath,
-      '# VitePress production — static build served by nginx\n' +
-      'FROM node:20-alpine AS builder\n' +
-      '\n' +
-      'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
-      '\n' +
-      'WORKDIR /app\n' +
-      'COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\n' +
-      'COPY apps/docs/ ./apps/docs/\n' +
-      'COPY packages/ ./packages/\n' +
-      'RUN pnpm install --frozen-lockfile\n' +
-      'RUN pnpm --filter @project/docs build\n' +
-      '\n' +
-      'FROM nginx:alpine\n' +
-      'COPY --from=builder /app/apps/docs/.vitepress/dist /usr/share/nginx/html\n' +
-      'EXPOSE 80\n'
-    );
-    console.log(chalk.green('  created docker/Dockerfile.vitepressprod'));
-  }
-
-  // Docs contract with docker-compose target
-  const docsContractPath = path.join(cwd, envDir, 'contracts', 'docs.contract.json');
-  if (!fs.existsSync(docsContractPath)) {
-    fs.writeFileSync(docsContractPath, JSON.stringify({
-      name: 'docs',
-      location: 'apps/docs',
-      target: {
-        type: 'docker-compose',
-        file: 'docker-compose.yml',
-        service: 'docs',
-        config: {
-          build: { context: '.', dockerfile: 'docker/Dockerfile.vitepressdev' },
-          ports: ['5173:5173'],
-          volumes: [
-            './apps/docs:/app/apps/docs',
-            './packages:/app/packages',
-          ],
-          command: 'vitepress dev --host 0.0.0.0',
-          restart: 'unless-stopped',
-        },
-        profileOverrides: {
-          production: {
-            build: { context: '.', dockerfile: 'docker/Dockerfile.vitepressprod' },
-            command: '',
-            ports: ['80:80'],
-            volumes: [],
-          },
-        },
-      },
-      includeVars: ['networking'],
-      vars: {
-        PORT: '${docs.PORT}',
-      },
-      defaults: {
-        PORT: '5173',
-      },
-    }, null, 2) + '\n');
-    console.log(chalk.green(`  created ${envDir}/contracts/docs.contract.json`));
-  }
-
-  // ── Add docker-compose.yml to .gitignore ──
-  const gitignorePath = path.join(cwd, '.gitignore');
-  if (fs.existsSync(gitignorePath)) {
-    let content = fs.readFileSync(gitignorePath, 'utf8');
-    if (!content.includes('docker-compose.yml')) {
-      content += '\n# Generated by ce build (contains resolved secrets)\ndocker-compose.yml\ndocker-compose.persistent.yml\n';
-      fs.writeFileSync(gitignorePath, content);
-      console.log(chalk.green('  updated .gitignore — added docker-compose.yml + docker-compose.persistent.yml'));
-    }
-  }
-
-  // Update ce.json defaultProfile to local
-  saveConfig(cwd, { defaultProfile: 'local' });
-  console.log(chalk.green('  updated ce.json defaultProfile → local'));
 }
 
 function scaffoldExamples(

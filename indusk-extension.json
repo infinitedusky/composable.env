@@ -4,6 +4,16 @@
   "version": "1.0.0",
   "provides": {
     "skill": true,
+    "scaffolds": {
+      "docker": {
+        "description": "Docker + Next.js project with OrbStack networking, profiles, Dockerfiles, and app-entrypoint.sh",
+        "command": "pnpm ce init --scaffold docker"
+      },
+      "vitepress": {
+        "description": "VitePress docs app in apps/docs/ with dev/build/preview scripts",
+        "command": "pnpm ce init --scaffold vitepress"
+      }
+    },
     "networking": {
       "description": "Service hostnames from OrbStack DNS — never use localhost port forwarding",
       "env_file": "apps/*/.env.local"
