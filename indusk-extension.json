@@ -1,7 +1,7 @@
 {
   "name": "composable-env",
   "description": "Docker-based local dev environment via declarative contracts and profiles",
-  "package_version": "1.11.0",
+  "package_version": "1.11.1",
   "requires": {
     "npm": "composable.env@>=1.9.0"
   },
