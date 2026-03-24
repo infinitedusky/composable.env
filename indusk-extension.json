@@ -1,37 +1,22 @@
 {
   "name": "composable-env",
   "description": "Docker-based local dev environment via declarative contracts and profiles",
-  "package_version": "1.11.1",
-  "requires": {
-    "npm": "composable.env@>=1.9.0"
-  },
-  "_source": "npm:composable.env",
   "provides": {
     "skill": true,
-    "scaffolds": {
-      "docker": {
-        "description": "Docker + Next.js project with OrbStack networking, profiles, Dockerfiles, and app-entrypoint.sh",
-        "command": "pnpm ce init --scaffold docker"
-      },
-      "vitepress": {
-        "description": "VitePress docs app in apps/docs/ with dev/build/preview scripts",
-        "command": "pnpm ce init --scaffold vitepress"
-      }
-    },
     "networking": {
       "description": "Service hostnames from OrbStack DNS — never use localhost port forwarding",
       "env_file": "apps/*/.env.local"
     },
     "services": {
       "description": "Docker service topology from contracts",
-      "command": "pnpm ce dc:ps --json"
+      "command": "pnpm ce status --json"
     },
     "health_checks": [
       { "name": "docker-services", "command": "docker compose ps --format json" },
       { "name": "env-files", "command": "test -f docker-compose.yml" }
     ],
     "verification": [
-      { "name": "env-build", "command": "pnpm ce env:build", "detect": { "file": "ce.json" } }
+      { "name": "env-build", "command": "pnpm env:build", "detect": { "file": "ce.json" } }
     ]
   },
   "hooks": {
