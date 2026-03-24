@@ -1,7 +1,11 @@
 {
   "name": "composable-env",
   "description": "Docker-based local dev environment via declarative contracts and profiles",
-  "version": "1.0.0",
+  "package_version": "1.11.0",
+  "requires": {
+    "npm": "composable.env@>=1.9.0"
+  },
+  "_source": "npm:composable.env",
   "provides": {
     "skill": true,
     "scaffolds": {
@@ -33,7 +37,8 @@
   "hooks": {
     "on_init": "pnpm ce add-skill",
     "on_health_check": "docker compose ps --filter status=running",
-    "on_onboard": "pnpm ce dc:ps"
+    "on_onboard": "pnpm ce status",
+    "on_post_update": "pnpm ce add-skill"
   },
   "detect": {
     "file": "ce.json"
