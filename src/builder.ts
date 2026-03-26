@@ -18,6 +18,7 @@ import {
   type ComposeMultiProfileEntry,
 } from './targets/docker-compose.js';
 import { writeNginxConfigs } from './targets/nginx.js';
+import { loadConfig } from './config.js';
 
 export class EnvironmentBuilder {
   private configDir: string;
@@ -415,6 +416,9 @@ export class EnvironmentBuilder {
           );
           if (Object.keys(serviceVars).length > 0) {
             componentPool.set('service', serviceVars);
+            // Re-run cross-component resolution now that service.* vars are available.
+            // loadScopedComponentPool already ran this, but service wasn't in the pool yet.
+            this.resolveCrossComponentRefs(componentPool);
           }
         }
 
@@ -692,6 +696,21 @@ export class EnvironmentBuilder {
       if (useNewFormat) {
         // New format: component-scoped pool + secrets layer
         componentPool = await this.loadScopedComponentPool(profile.components, profileName || 'default');
+
+        // Inject service.* pseudo-component with auto-generated vars
+        const config = loadConfig(this.configDir);
+        const pName = profileName || 'default';
+        const profileConfig = config.profiles?.[pName];
+        if (profileConfig) {
+          const serviceVars = this.generateServiceVars(
+            availableContracts, pName, profileConfig
+          );
+          if (Object.keys(serviceVars).length > 0) {
+            componentPool.set('service', serviceVars);
+            this.resolveCrossComponentRefs(componentPool);
+          }
+        }
+
         flatPool = this.flattenComponentPool(componentPool);
       } else {
         // Legacy format: flat NAMESPACE-prefixed pool
@@ -701,10 +720,15 @@ export class EnvironmentBuilder {
 
       const resolvedPool = this.resolveVariables(flatPool);
 
+      // Rebuild componentPool from resolved values for validation
+      const resolvedComponentPool = componentPool
+        ? this.rebuildComponentPool(componentPool, resolvedPool)
+        : undefined;
+
       // Validate all contracts before writing any files (atomic)
       for (const [serviceName, contract] of availableContracts) {
-        if (isNewFormatContract(contract) && componentPool) {
-          const validation = this.contracts.validateVarsContract(serviceName, componentPool);
+        if (isNewFormatContract(contract) && resolvedComponentPool) {
+          const validation = this.contracts.validateVarsContract(serviceName, resolvedComponentPool);
           if (!validation.valid) {
             errors.push(
               `Service '${serviceName}' missing required variables: ${validation.missing.join(', ')}`
