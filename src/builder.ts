@@ -1094,7 +1094,24 @@ export class EnvironmentBuilder {
     }
 
     if (pass >= maxPasses) {
-      console.warn(`⚠️ Cross-component resolution hit ${maxPasses} passes — possible circular reference.`);
+      // Only warn if there are actually still unresolved refs
+      let stillUnresolved = false;
+      for (const [componentName, vars] of pool) {
+        if (componentName === 'secrets') continue;
+        for (const value of Object.values(vars)) {
+          if (typeof value === 'string' && /\$\{([^}]+\.[^}]+)\}/.test(value)) {
+            // Skip ${secrets.*} — those are resolved in a different pass
+            if (!/\$\{secrets\.[^}]+\}/.test(value)) {
+              stillUnresolved = true;
+              break;
+            }
+          }
+        }
+        if (stillUnresolved) break;
+      }
+      if (stillUnresolved) {
+        console.warn(`⚠️ Cross-component resolution hit ${maxPasses} passes — possible circular reference.`);
+      }
     }
   }
 
