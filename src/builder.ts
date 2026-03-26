@@ -1048,7 +1048,7 @@ export class EnvironmentBuilder {
         for (const [key, value] of Object.entries(vars)) {
           if (typeof value !== 'string' || !/\$\{([^}]+\.[^}]+)\}/.test(value)) continue;
 
-          const resolved = value.replace(/\$\{([^}]+)\.([^}]+)\}/g, (match, refComponent: string, refKey: string) => {
+          const resolved = value.replace(/\$\{([^}.]+)\.([^}]+)\}/g, (match, refComponent: string, refKey: string) => {
             if (refComponent === 'secrets') return match; // Already handled
             const refVars = pool.get(refComponent);
             if (refVars && refKey in refVars) {
