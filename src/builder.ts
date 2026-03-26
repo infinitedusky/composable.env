@@ -426,10 +426,17 @@ export class EnvironmentBuilder {
 
       const resolvedPool = this.resolveVariables(flatPool);
 
+      // Rebuild componentPool from resolved values for validation
+      // This ensures ${service.*} and cross-component refs are resolved
+      // before we check if contract vars can be satisfied.
+      const resolvedComponentPool = componentPool
+        ? this.rebuildComponentPool(componentPool, resolvedPool)
+        : undefined;
+
       // Validate contracts for this profile
       for (const [serviceName, contract] of availableContracts) {
-        if (isNewFormatContract(contract) && componentPool) {
-          const validation = this.contracts.validateVarsContract(serviceName, componentPool);
+        if (isNewFormatContract(contract) && resolvedComponentPool) {
+          const validation = this.contracts.validateVarsContract(serviceName, resolvedComponentPool);
           if (!validation.valid) {
             errors.push(
               `[${profileName}] Service '${serviceName}' missing required variables: ${validation.missing.join(', ')}`
@@ -1082,6 +1089,26 @@ export class EnvironmentBuilder {
       }
     }
     return flat;
+  }
+
+  /**
+   * Rebuild the scoped componentPool from the resolved flat pool.
+   * This ensures validation sees fully resolved values (e.g., ${service.*} expanded).
+   */
+  private rebuildComponentPool(
+    original: Map<string, Record<string, string>>,
+    resolvedFlat: Record<string, string>
+  ): Map<string, Record<string, string>> {
+    const rebuilt = new Map<string, Record<string, string>>();
+    for (const [componentName, vars] of original) {
+      const resolvedVars: Record<string, string> = {};
+      for (const key of Object.keys(vars)) {
+        const flatKey = `${componentName}.${key}`;
+        resolvedVars[key] = resolvedFlat[flatKey] ?? vars[key];
+      }
+      rebuilt.set(componentName, resolvedVars);
+    }
+    return rebuilt;
   }
 
   /**
