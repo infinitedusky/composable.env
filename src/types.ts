@@ -86,13 +86,6 @@ export interface BuildResult {
 
 // ─── ce.json root config ─────────────────────────────────────────────────────
 
-export const CeScriptsConfigSchema = z.object({
-  command: z.string(),
-  actions: z.array(z.string()),
-}).strict();
-
-export type CeScriptsConfig = z.infer<typeof CeScriptsConfigSchema>;
-
 export const CeServiceOverrideSchema = z.object({
   suffix: z.string().optional(),
   domain: z.string().optional(),
@@ -109,7 +102,6 @@ export type CeProfileConfig = z.infer<typeof CeProfileConfigSchema>;
 export const CeConfigSchema = z.object({
   envDir: z.string().default('env'),
   defaultProfile: z.string().default('default'),
-  scripts: CeScriptsConfigSchema.optional(),
   profiles: z.record(z.string(), CeProfileConfigSchema).optional(),
 }).strict();
 

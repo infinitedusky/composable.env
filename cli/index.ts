@@ -5,8 +5,6 @@ import { Command } from 'commander';
 import { registerBuildCommand } from './commands/build.js';
 import { registerListCommand } from './commands/list.js';
 import { registerInitCommand } from './commands/init.js';
-import { registerRunCommand } from './commands/run.js';
-import { registerScriptCommand } from './commands/script.js';
 import { registerUninstallCommand } from './commands/uninstall.js';
 import { registerVaultCommand } from './commands/vault.js';
 import { registerStartCommand } from './commands/start.js';
@@ -29,8 +27,6 @@ program
 registerBuildCommand(program);
 registerListCommand(program);
 registerInitCommand(program);
-registerRunCommand(program);
-registerScriptCommand(program);
 registerUninstallCommand(program);
 registerVaultCommand(program);
 registerStartCommand(program);

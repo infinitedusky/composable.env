@@ -175,7 +175,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 
 | Command | Alias | Purpose |
 |---------|-------|---------|
-| `pnpm ce init` | — | Scaffold env/ directory and ce.json. `--scaffold docker` adds Docker + Next.js + VitePress setup. |
+| `pnpm ce init` | — | Scaffold env/ directory and ce.json. `--scaffold docker` adds Docker + Next.js + VitePress setup. `--scaffold vitepress` for VitePress only. |
 | `pnpm ce env:build` | `pnpm ce build` | Build .env files + docker-compose.yml. With `--profile X`: only `.env.X`. Without: all profiles. Compose file always includes all profiles. |
 | `pnpm ce profile:list` | `pnpm ce p:list` | Show components, profiles, contracts |
 | `pnpm ce pm2:start [profile]` | `pnpm ce start` | Build + launch PM2 dev environment |
@@ -187,9 +187,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 | `pnpm ce persistent:down` | — | Stop persistent services (preserves volumes) |
 | `pnpm ce persistent:destroy` | — | Stop persistent services and remove volumes |
 | `pnpm ce persistent:status` | — | Show persistent service status |
-| `pnpm ce vault init` | — | Initialize age-encrypted vault |
-| `pnpm ce vault set KEY=VALUE` | — | Encrypt a secret |
-| `pnpm ce vault get KEY` | — | Decrypt a secret |
+| `pnpm ce vault <subcommand>` | — | Optional encrypted secrets. Subcommands: `init`, `set <key> <value>`, `get <key>`, `ls`, `add`, `remove`, `recipients` |
 | `pnpm ce migrate` | — | Convert legacy format to vars format |
 | `pnpm ce add-skill` | — | Install Claude Code skill |
 | `pnpm ce uninstall` | — | Remove all ce artifacts |
@@ -219,7 +217,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 - `envDir` — custom env directory (default: `"env"`)
 - `defaultProfile` — default when no `--profile` flag
 - `profiles` — per-profile config: `suffix` (compose service name suffix), `domain` (for auto-generated `${service.*}` vars), `override` (per-service suffix/domain overrides)
-- Profile resolution: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultProfile` > `"default"`
+- Profile resolution: `--profile` flag > `CE_PROFILE` env var (legacy: `CENV_PROFILE`) > `ce.json defaultProfile` > `"default"`
 
 ## Contract format
 
@@ -247,7 +245,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 - Right side = **always** a `${component.KEY}` reference. Contracts only reference components, never secrets directly. Secrets flow through components (`${secrets.KEY}` in a component, `${component.KEY}` in a contract).
 - `defaults` is the **only** place for hardcoded values in a contract — static fallbacks like `LOG_LEVEL=info`. Everything in `vars` should be a `${component.KEY}` reference so values vary by profile.
 - `defaults` provides fallbacks for unresolvable vars
-- `dev` defines how `pnpm ce pm2:start` runs this service via PM2
+- `dev` defines how `pnpm ce pm2:start` runs this service via PM2. Fields: `command` (required), `label` (optional display name), `cwd` (optional working directory)
 - `onlyProfiles` — optional array of ce profile names. If set, the contract is only included when building one of those profiles. Useful for dev-only services (log aggregators, debug tools) that shouldn't exist in production builds
 - `includeVars` — array of var set names to inherit. Resolves `*.vars.json` files from `env/contracts/`. Merged left-to-right, contract's own vars win on conflict
 
