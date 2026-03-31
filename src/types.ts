@@ -94,6 +94,7 @@ export const CeServiceOverrideSchema = z.object({
 export const CeProfileConfigSchema = z.object({
   suffix: z.string(),
   domain: z.string().optional(),
+  tls: z.boolean().optional(),
   override: z.record(z.string(), CeServiceOverrideSchema).optional(),
 }).strict();
 

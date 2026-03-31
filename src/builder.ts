@@ -580,7 +580,7 @@ export class EnvironmentBuilder {
 
   /**
    * Generate service.* pseudo-variables for all target contracts.
-   * For each service: host, address, suffix, domain.
+   * For each service: host, address, suffix, domain, protocol.
    * Keys are dotted: "game-server.host", "game-server.address", etc.
    */
   private generateServiceVars(
@@ -591,10 +591,12 @@ export class EnvironmentBuilder {
     const vars: Record<string, string> = {};
     const defaultSuffix = profileConfig.suffix;
     const defaultDomain = profileConfig.domain || '';
+    const defaultProtocol = profileConfig.tls ? 'https' : 'http';
 
     // Default entries — profile-level suffix and domain without a specific service
     vars['default.suffix'] = defaultSuffix;
     vars['default.domain'] = defaultDomain;
+    vars['default.protocol'] = defaultProtocol;
 
     for (const [, contract] of contracts) {
       if (!contract.target) continue;
@@ -612,6 +614,7 @@ export class EnvironmentBuilder {
       vars[`${svcName}.address`] = address;
       vars[`${svcName}.suffix`] = suffix;
       vars[`${svcName}.domain`] = domain;
+      vars[`${svcName}.protocol`] = defaultProtocol;
     }
 
     return vars;
