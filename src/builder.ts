@@ -527,9 +527,20 @@ export class EnvironmentBuilder {
       };
     }
 
+    // Derive compose project name from profile domains (controls OrbStack DNS)
+    let composeName: string | undefined;
+    if (profileConfigs) {
+      for (const config of Object.values(profileConfigs)) {
+        if (config.domain?.endsWith('.orb.local')) {
+          composeName = config.domain.split('.')[0];
+          break;
+        }
+      }
+    }
+
     // Write multi-profile compose files
     for (const [filePath, entries] of composeGroups) {
-      const result = await writeMultiProfileComposeFile(filePath, entries, profileNames, profileSuffixes);
+      const result = await writeMultiProfileComposeFile(filePath, entries, profileNames, profileSuffixes, composeName);
       warnings.push(...result.warnings);
       generatedFiles.push(filePath);
     }

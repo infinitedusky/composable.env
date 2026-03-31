@@ -50,7 +50,8 @@ export async function writeMultiProfileComposeFile(
   filePath: string,
   entries: ComposeMultiProfileEntry[],
   profileNames: string[],
-  profileSuffixes?: Record<string, string>
+  profileSuffixes?: Record<string, string>,
+  composeName?: string
 ): Promise<ComposeWriteResult> {
   const warnings: string[] = [];
 
@@ -147,6 +148,11 @@ export async function writeMultiProfileComposeFile(
   doc.setSchema('1.1'); // enables merge key support
 
   const docContents = doc.contents as YAMLMap;
+
+  // Set compose project name (controls OrbStack DNS: name.orb.local)
+  if (composeName) {
+    docContents.add(doc.createPair('name', doc.createNode(composeName)));
+  }
 
   // Collect all services (flat) for volume/network detection later
   const allServicesFlat: Record<string, Record<string, unknown>> = {};
