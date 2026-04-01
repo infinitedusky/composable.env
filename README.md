@@ -574,32 +574,6 @@ npm install -D composable.env
 ce init  # auto-detects turbo.json, adds env/** to globalDependencies
 ```
 
-### Generate per-app scripts
-
-```bash
-ce scripts -c turbo --actions dev,build,start
-```
-
-Generates profile-aware scripts in `package.json`:
-
-```json
-{
-  "scripts": {
-    "env:build:api": "ce build --profile",
-    "dev:api": "ce run --profile -- turbo dev --filter=api",
-    "build:api": "ce run --profile -- turbo build --filter=api",
-    "dev": "ce run --profile default -- turbo dev"
-  }
-}
-```
-
-```bash
-pnpm dev:api production    # build + run API with production env
-pnpm dev                   # dev everything with default profile
-```
-
-Config is saved to `ce.json`. Regenerate anytime with `ce scripts:sync`.
-
 ---
 
 ## CLI reference
@@ -611,10 +585,6 @@ Config is saved to `ce.json`. Regenerate anytime with `ce scripts:sync`.
 | `ce build [--profile name]` | Build .env files + docker-compose.yml |
 | `ce list` | List components, profiles, contracts |
 | `ce run [--profile name] -- <cmd>` | Load env and run a command (auto-builds) |
-| `ce script <name> -c <cmd>` | Inject a single profile-aware script |
-| `ce scripts -c <cmd> [--actions]` | Generate per-app scripts from contracts |
-| `ce scripts:sync` | Regenerate scripts from ce.json config |
-| `ce scripts:register <name...>` | Register existing scripts for cleanup |
 | `ce persistent up` | Start persistent Docker services |
 | `ce persistent down` | Stop persistent services (preserves volumes) |
 | `ce persistent destroy` | Stop and remove persistent volumes |
@@ -651,8 +621,7 @@ Config is saved to `ce.json`. Regenerate anytime with `ce scripts:sync`.
       "suffix": "",
       "domain": "myproject.com"
     }
-  },
-  "scripts": {}
+  }
 }
 ```
 
@@ -664,7 +633,6 @@ Config is saved to `ce.json`. Regenerate anytime with `ce scripts:sync`.
 | `profiles.{name}.suffix` | — | Appended to Docker service names (e.g., `-local`) |
 | `profiles.{name}.domain` | — | Domain for auto-generated `${service.*}` vars |
 | `profiles.{name}.override` | — | Per-service suffix/domain overrides |
-| `scripts` | — | Script generation config (managed by `ce scripts`) |
 
 ---
 
