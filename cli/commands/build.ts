@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { EnvironmentBuilder, ContractManager, loadConfig } from '../../src/index.js';
+import { EnvironmentBuilder, loadConfig } from '../../src/index.js';
 
 export function registerBuildCommand(program: Command): void {
   // ce env:build <profile> — build a single profile (required)
@@ -15,23 +15,8 @@ export function registerBuildCommand(program: Command): void {
       const builder = new EnvironmentBuilder(configDir, '.env', profile, config.envDir);
 
       try {
-        const contractManager = new ContractManager(configDir, config.envDir);
-        await contractManager.initialize();
-        const hasTargets = [...contractManager.getContracts().values()].some(c => c.target);
-
-        let result;
-        if (hasTargets) {
-          const allProfiles = builder.discoverAllProfileNames();
-          console.log(chalk.blue(`Building .env for profile: ${profile}`));
-          console.log(chalk.gray(`   Compose file includes all profiles: ${allProfiles.join(', ')}`));
-          const profileSuffixes = config.profiles
-            ? Object.fromEntries(Object.entries(config.profiles).map(([name, cfg]) => [name, cfg.suffix]))
-            : undefined;
-          result = await builder.buildAllProfiles(profile, profileSuffixes, config.profiles);
-        } else {
-          console.log(chalk.blue(`Building from profile: ${profile}`));
-          result = await builder.buildFromProfile(profile);
-        }
+        console.log(chalk.blue(`Building from profile: ${profile}`));
+        const result = await builder.buildFromProfile(profile);
 
         printResult(result);
       } catch (error) {
