@@ -589,7 +589,7 @@ export class EnvironmentBuilder {
       );
 
       if (contractsWithDefault.length > 0) {
-        const shouldWriteDefaults = !envProfile; // only write defaults in full builds
+        const shouldWriteDefaults = !envProfile || envProfile === 'default';
         if (shouldWriteDefaults) {
           // Build a defaults-only component pool using only [default] sections
           const defaultComponents: Components = {};
