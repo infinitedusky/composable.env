@@ -58,7 +58,7 @@ export function registerUpCommand(program: Command): void {
       if (options.buildEnv) {
         console.log(chalk.blue(`Building environment for profile: ${profile}...`));
         try {
-          execSync(`npx ce build --profile ${profile}`, { cwd, stdio: 'inherit' });
+          execSync(`npx ce env:build ${profile}`, { cwd, stdio: 'inherit' });
         } catch {
           console.error(chalk.red('Failed to build environment.'));
           process.exit(1);
