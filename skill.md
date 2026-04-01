@@ -1,4 +1,5 @@
 ---
+name: composable-env
 description: Work with composable.env — build, debug, scaffold, and manage environment configuration
 ---
 
@@ -176,7 +177,8 @@ secrets (.env.secrets.shared + .env.secrets.local)
 | Command | Alias | Purpose |
 |---------|-------|---------|
 | `pnpm ce init` | — | Scaffold env/ directory and ce.json. `--scaffold docker` adds Docker + Next.js + VitePress setup. |
-| `pnpm ce env:build` | `pnpm ce build` | Build .env files + docker-compose.yml. With `--profile X`: only `.env.X`. Without: all profiles. Compose file always includes all profiles. |
+| `pnpm ce env:build <profile>` | `pnpm ce build <profile>` | Build .env files for a single profile (required argument). If docker-compose targets exist, compose file includes all profiles. |
+| `pnpm ce env:build:all` | `pnpm ce build:all` | Build .env files for all profiles. |
 | `pnpm ce profile:list` | `pnpm ce p:list` | Show components, profiles, contracts |
 | `pnpm ce pm2:start [profile]` | `pnpm ce start` | Build + launch PM2 dev environment |
 | `pnpm ce dc:up [profile]` | `pnpm ce up` | Build env, then `docker compose --profile X down && up -d --build` |

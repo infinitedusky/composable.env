@@ -107,8 +107,9 @@ DB_PASSWORD=local-dev-password
 ### 6. Build
 
 ```bash
-ce build                        # builds .env for default profile
-ce build --profile production   # builds .env.production
+ce build local                  # builds .env.local
+ce build production             # builds .env.production
+ce build:all                    # builds all profiles
 ```
 
 Each contract generates a `.env.{profile}` file at its `location`.
@@ -500,7 +501,7 @@ server {
 On your VPS:
 
 ```bash
-ce build --profile production
+ce build production
 sudo cp nginx.production.conf /etc/nginx/sites-enabled/myproject
 sudo nginx -s reload
 ```
@@ -582,7 +583,8 @@ ce init  # auto-detects turbo.json, adds env/** to globalDependencies
 |---------|-------------|
 | `ce init` | Scaffold env/ directory and ce.json |
 | `ce init --scaffold docker` | Full Docker + Next.js + VitePress setup |
-| `ce build [--profile name]` | Build .env files + docker-compose.yml |
+| `ce build <profile>` | Build .env files for a single profile |
+| `ce build:all` | Build .env files for all profiles |
 | `ce list` | List components, profiles, contracts |
 | `ce run [--profile name] -- <cmd>` | Load env and run a command (auto-builds) |
 | `ce persistent up` | Start persistent Docker services |
