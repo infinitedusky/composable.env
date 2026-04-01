@@ -394,245 +394,29 @@ export class EnvironmentBuilder {
   ): Promise<BuildResult> {
     await this.initialize();
 
-    const allComponents = this.discoverComponents();
-    if (allComponents.length === 0) {
-      return {
-        success: false,
-        envPath: this.outputPath,
-        errors: [`No component files found in ${this.envDir}/components/`],
-      };
-    }
-
     const profileNames = this.discoverAllProfileNames();
     if (profileNames.length === 0) {
       return {
         success: false,
         envPath: this.outputPath,
-        errors: ['No profiles found. Create profile JSON files or add [section] names to components.'],
+        errors: ['No profiles found. Create profile JSON files in env/profiles/.'],
       };
     }
-
-    const allContracts = this.contracts.getContracts();
-    const useNewFormat = this.contracts.hasNewFormatContracts();
 
     const errors: string[] = [];
     const warnings: string[] = [];
     const generatedFiles: string[] = [];
 
-    // Collect multi-profile compose entries across all profiles
-    const composeGroups = new Map<string, ComposeMultiProfileEntry[]>();
+    // Build each profile using the same code path as buildFromProfile
+    const profilesToProcess = envProfile ? [envProfile] : profileNames;
 
-    for (const profileName of profileNames) {
-      // Resolve this profile's component pool
-      const { profileData, inheritanceChain } = this.resolveProfileData(profileName, allComponents);
-
-      // Build merged components
-      const mergedComponents: Components = {};
-      const profileOverrides = profileData.components || {};
-      for (const component of allComponents) {
-        const sections: string[] = ['default'];
-        if (profileOverrides[component]) {
-          const override = profileOverrides[component];
-          Array.isArray(override) ? sections.push(...override) : sections.push(override);
-        } else if (inheritanceChain.length > 0) {
-          sections.push(...inheritanceChain);
-        }
-        for (const chainProfile of inheritanceChain) {
-          if (!sections.includes(chainProfile)) sections.push(chainProfile);
-        }
-        mergedComponents[component] = sections;
-      }
-
-      // Filter contracts by onlyProfiles
-      const availableContracts = new Map(
-        [...allContracts].filter(([, contract]) => {
-          if (!contract.onlyProfiles || contract.onlyProfiles.length === 0) return true;
-          return contract.onlyProfiles.includes(profileName);
-        })
-      );
-
-      // Resolve component pool
-      let componentPool: Map<string, Record<string, string>> | undefined;
-      let flatPool: Record<string, string>;
-
-      if (useNewFormat) {
-        componentPool = await this.loadScopedComponentPool(mergedComponents, profileName);
-
-        // Inject service.* pseudo-component with auto-generated vars
-        const profileConfig = profileConfigs?.[profileName];
-        if (profileConfig) {
-          const serviceVars = this.generateServiceVars(
-            availableContracts, profileName, profileConfig
-          );
-          if (Object.keys(serviceVars).length > 0) {
-            componentPool.set('service', serviceVars);
-            // Re-run cross-component resolution now that service.* vars are available.
-            // loadScopedComponentPool already ran this, but service wasn't in the pool yet.
-            this.resolveCrossComponentRefs(componentPool);
-          }
-        }
-
-        flatPool = this.flattenComponentPool(componentPool);
+    for (const profileName of profilesToProcess) {
+      const result = await this.buildFromProfile(profileName);
+      if (!result.success) {
+        errors.push(...(result.errors || [`Failed to build profile '${profileName}'`]));
       } else {
-        flatPool = await this.loadFlatComponentPool(mergedComponents);
-        await this.loadSharedFiles(flatPool);
-      }
-
-      const resolvedPool = this.resolveVariables(flatPool);
-
-      // Rebuild componentPool from resolved values for validation
-      // This ensures ${service.*} and cross-component refs are resolved
-      // before we check if contract vars can be satisfied.
-      const resolvedComponentPool = componentPool
-        ? this.rebuildComponentPool(componentPool, resolvedPool)
-        : undefined;
-
-      // Validate contracts for this profile
-      for (const [serviceName, contract] of availableContracts) {
-        if (isNewFormatContract(contract) && resolvedComponentPool) {
-          const validation = this.contracts.validateVarsContract(serviceName, resolvedComponentPool);
-          if (!validation.valid) {
-            errors.push(
-              `[${profileName}] Service '${serviceName}' missing required variables: ${validation.missing.join(', ')}`
-            );
-          }
-        } else {
-          const validation = this.contracts.validateContract(serviceName, resolvedPool);
-          if (!validation.valid) {
-            errors.push(
-              `[${profileName}] Service '${serviceName}' missing required variables: ${validation.missing.join(', ')}`
-            );
-          }
-        }
-      }
-
-      if (errors.length > 0) continue; // validate all profiles before failing
-
-      // Write .env.{profile} for location contracts
-      // If envProfile is set, only write for that specific profile
-      const shouldWriteEnv = !envProfile || envProfile === profileName;
-
-      for (const [serviceName, contract] of availableContracts) {
-        if (contract.location && shouldWriteEnv) {
-          // Handle default profile redirects and ignores
-          if (profileName === 'default') {
-            if (contract.ignoreDefault) continue;
-            if (contract.default) {
-              // Redirect: write to contract.default instead of .env.default
-              const outputPath = `${contract.location}/${contract.default}`;
-              const outputDir = path.dirname(outputPath);
-              if (!fs.existsSync(outputDir)) {
-                await fs.promises.mkdir(outputDir, { recursive: true });
-              }
-              await this.generateServiceEnvFile(
-                serviceName, resolvedPool, outputPath, profileName, componentPool
-              );
-              generatedFiles.push(outputPath);
-              continue;
-            }
-          }
-
-          const outputPath = `${contract.location}/.env.${profileName}`;
-          const outputDir = path.dirname(outputPath);
-          if (!fs.existsSync(outputDir)) {
-            await fs.promises.mkdir(outputDir, { recursive: true });
-          }
-          await this.generateServiceEnvFile(
-            serviceName, resolvedPool, outputPath, profileName, componentPool
-          );
-          generatedFiles.push(outputPath);
-        }
-
-        // Collect target entries for multi-profile compose
-        if (contract.target) {
-          // Persistent contracts go to a separate compose file
-          const baseFilePath = contract.target.file;
-          const filePath = contract.persistent
-            ? baseFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
-            : baseFilePath;
-
-          if (!composeGroups.has(filePath)) {
-            composeGroups.set(filePath, []);
-          }
-
-          let serviceVars: Record<string, string>;
-          if (useNewFormat && componentPool) {
-            serviceVars = this.contracts.mapVarsContract(serviceName, componentPool);
-          } else {
-            serviceVars = this.contracts.mapContractVariables(serviceName, resolvedPool);
-          }
-
-          if (contract.defaults) {
-            for (const [key, value] of Object.entries(contract.defaults)) {
-              if (serviceVars[key] === undefined) {
-                serviceVars[key] = value;
-              }
-            }
-          }
-
-          composeGroups.get(filePath)!.push({
-            contractName: serviceName,
-            serviceName: contract.target.service,
-            vars: serviceVars,
-            config: contract.target.config
-              ? this.resolveConfigValues(contract.target.config, resolvedPool)
-              : undefined,
-            profileName,
-            profileOverrides: contract.target.profileOverrides
-              ? this.resolveConfigValues(contract.target.profileOverrides, resolvedPool)
-              : undefined,
-          });
-        }
-      }
-    }
-
-    // If no "default" profile exists, handle contracts with `default` set:
-    // Build using only [default] sections from components, skip unresolvable vars.
-    const hasDefaultProfile = profileNames.includes('default');
-    if (!hasDefaultProfile) {
-      const contractsWithDefault = [...allContracts].filter(
-        ([, contract]) => contract.default && contract.location && !contract.ignoreDefault
-      );
-
-      if (contractsWithDefault.length > 0) {
-        const shouldWriteDefaults = !envProfile || envProfile === 'default';
-        if (shouldWriteDefaults) {
-          // Build a defaults-only component pool using only [default] sections
-          const defaultComponents: Components = {};
-          for (const component of allComponents) {
-            defaultComponents[component] = ['default'];
-          }
-
-          const useNewFormat = this.contracts.hasNewFormatContracts();
-          let defaultComponentPool: Map<string, Record<string, string>> | undefined;
-          let defaultFlatPool: Record<string, string>;
-
-          if (useNewFormat) {
-            defaultComponentPool = await this.loadScopedComponentPool(defaultComponents, 'default');
-            defaultFlatPool = this.flattenComponentPool(defaultComponentPool);
-          } else {
-            defaultFlatPool = await this.loadFlatComponentPool(defaultComponents);
-            await this.loadSharedFiles(defaultFlatPool);
-          }
-
-          const resolvedDefaultPool = this.resolveVariables(defaultFlatPool);
-          const resolvedDefaultComponentPool = defaultComponentPool
-            ? this.rebuildComponentPool(defaultComponentPool, resolvedDefaultPool)
-            : undefined;
-
-          for (const [serviceName, contract] of contractsWithDefault) {
-            const outputPath = `${contract.location}/${contract.default}`;
-            const outputDir = path.dirname(outputPath);
-            if (!fs.existsSync(outputDir)) {
-              await fs.promises.mkdir(outputDir, { recursive: true });
-            }
-            // Use lenient generation — skip unresolvable vars instead of erroring
-            await this.generateServiceEnvFileLenient(
-              serviceName, resolvedDefaultPool, outputPath, 'default', resolvedDefaultComponentPool
-            );
-            generatedFiles.push(outputPath);
-          }
-        }
+        if (result.envPath) generatedFiles.push(result.envPath);
+        if (result.warnings) warnings.push(...result.warnings);
       }
     }
 
@@ -645,49 +429,7 @@ export class EnvironmentBuilder {
       };
     }
 
-    // Derive compose project name from profile domains (controls OrbStack DNS)
-    let composeName: string | undefined;
-    if (profileConfigs) {
-      for (const config of Object.values(profileConfigs)) {
-        if (config.domain?.endsWith('.orb.local')) {
-          composeName = config.domain.split('.')[0];
-          break;
-        }
-      }
-    }
-
-    // Write multi-profile compose files
-    for (const [filePath, entries] of composeGroups) {
-      const result = await writeMultiProfileComposeFile(filePath, entries, profileNames, profileSuffixes, composeName);
-      warnings.push(...result.warnings);
-      generatedFiles.push(filePath);
-    }
-
-    // Generate nginx configs for profiles with domains and contracts with subdomains
-    if (profileConfigs) {
-      const profileDomains: Record<string, string> = {};
-      for (const [name, config] of Object.entries(profileConfigs)) {
-        if (config.domain) profileDomains[name] = config.domain;
-      }
-      if (Object.keys(profileDomains).length > 0) {
-        const nginxResults = writeNginxConfigs(
-          this.configDir,
-          allContracts,
-          profileNames,
-          profileSuffixes || {},
-          profileDomains,
-        );
-        for (const result of nginxResults) {
-          generatedFiles.push(result.filePath);
-          if (result.warnings.length > 0) {
-            warnings.push(`Nginx routes (${path.basename(result.filePath)}):`);
-            warnings.push(...result.warnings);
-          }
-        }
-      }
-    }
-
-    warnings.push(`Built ${profileNames.length} profiles: ${profileNames.join(', ')}`);
+    warnings.push(`Built ${profilesToProcess.length} profiles: ${profilesToProcess.join(', ')}`);
 
     return {
       success: true,
@@ -740,47 +482,6 @@ export class EnvironmentBuilder {
 
   /**
    * Resolve profile data and inheritance chain for a given profile name.
-   * Returns default-like data if the profile has no JSON file but has component sections.
-   */
-  private resolveProfileData(
-    profileName: string,
-    allComponents: string[]
-  ): { profileData: Profile; inheritanceChain: string[] } {
-    if (profileName === 'default') {
-      return {
-        profileData: { name: 'Default', description: 'Default environment', components: {} },
-        inheritanceChain: [],
-      };
-    }
-
-    const profilePath = path.join(this.configDir, this.envDir, 'profiles', `${profileName}.json`);
-    if (fs.existsSync(profilePath)) {
-      const loaded = this.loadProfileWithInheritance(profileName);
-      return {
-        profileData: loaded.profileData,
-        inheritanceChain: loaded.inheritanceChain,
-      };
-    }
-
-    // No JSON — section-based profile
-    if (this.profileSectionExists(profileName, allComponents)) {
-      return {
-        profileData: {
-          name: profileName,
-          description: `Auto-generated from [${profileName}] sections`,
-          components: {},
-        },
-        inheritanceChain: [profileName],
-      };
-    }
-
-    // Profile doesn't exist at all — return empty (caller should have validated)
-    return {
-      profileData: { name: profileName, description: '', components: {} },
-      inheritanceChain: [profileName],
-    };
-  }
-
   // ─── Private helpers ────────────────────────────────────────────────────────
 
   /**
@@ -927,13 +628,6 @@ export class EnvironmentBuilder {
         // A contract can have location, target, or both
 
         if (contract.location) {
-          // Standard .env file output
-          if (!this.envName) {
-            throw new Error(
-              'Environment name required. Pass it as the third constructor argument (e.g., "production").'
-            );
-          }
-
           // Handle default profile redirects and ignores
           if (currentProfile === 'default') {
             if (contract.ignoreDefault) continue;
@@ -951,7 +645,7 @@ export class EnvironmentBuilder {
             }
           }
 
-          const outputPath = `${contract.location}/.env.${this.envName}`;
+          const outputPath = `${contract.location}/.env.${currentProfile}`;
           const outputDir = path.dirname(outputPath);
           if (!fs.existsSync(outputDir)) {
             await fs.promises.mkdir(outputDir, { recursive: true });
@@ -965,7 +659,11 @@ export class EnvironmentBuilder {
 
         if (contract.target) {
           // Docker-compose target — collect entries grouped by file
-          const filePath = contract.target.file;
+          // Persistent contracts go to a separate compose file
+          const baseFilePath = contract.target.file;
+          const filePath = contract.persistent
+            ? baseFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
+            : baseFilePath;
           if (!composeGroups.has(filePath)) {
             composeGroups.set(filePath, []);
           }
@@ -1028,6 +726,30 @@ export class EnvironmentBuilder {
         );
         warnings.push(...result.warnings);
         generatedFiles.push(filePath);
+      }
+
+      // Generate nginx configs for profiles with domains and contracts with subdomains
+      if (profileConfigs) {
+        const profileDomains: Record<string, string> = {};
+        for (const [name, config] of Object.entries(profileConfigs)) {
+          if (config.domain) profileDomains[name] = config.domain;
+        }
+        if (Object.keys(profileDomains).length > 0) {
+          const nginxResults = writeNginxConfigs(
+            this.configDir,
+            availableContracts,
+            profileNames,
+            profileSuffixes || {},
+            profileDomains,
+          );
+          for (const result of nginxResults) {
+            generatedFiles.push(result.filePath);
+            if (result.warnings.length > 0) {
+              warnings.push(`Nginx routes (${path.basename(result.filePath)}):`);
+              warnings.push(...result.warnings);
+            }
+          }
+        }
       }
 
       if (profile.docker) {
