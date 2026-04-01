@@ -127,7 +127,13 @@ export class EnvironmentBuilder {
       }
 
       profileData.components = mergedComponents;
-      return this.buildServiceEnvironments(profileData, profileName);
+      // Load profile config from ce.json for suffix/domain support
+      const ceConfig = loadConfig(this.configDir);
+      const profileSuffixes = ceConfig.profiles
+        ? Object.fromEntries(Object.entries(ceConfig.profiles).map(([name, cfg]) => [name, cfg.suffix]))
+        : undefined;
+
+      return this.buildServiceEnvironments(profileData, profileName, profileSuffixes, ceConfig.profiles);
     } catch (error) {
       return {
         success: false,
@@ -791,7 +797,9 @@ export class EnvironmentBuilder {
 
   private async buildServiceEnvironments(
     profile: Profile,
-    profileName?: string
+    profileName?: string,
+    profileSuffixes?: Record<string, string>,
+    profileConfigs?: Record<string, CeProfileConfig>
   ): Promise<BuildResult> {
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -990,8 +998,34 @@ export class EnvironmentBuilder {
       }
 
       // Write docker-compose files (one write per file, all services batched)
+      const profileNames = profileSuffixes ? Object.keys(profileSuffixes) : [currentProfile];
+
+      // Derive compose project name from .orb.local domain
+      let composeName: string | undefined;
+      if (profileConfigs) {
+        for (const config of Object.values(profileConfigs)) {
+          if (config.domain?.endsWith('.orb.local')) {
+            composeName = config.domain.split('.')[0];
+            break;
+          }
+        }
+      }
+
       for (const [filePath, entries] of composeGroups) {
-        const result = await writeDockerComposeFile(filePath, entries, profileName);
+        // Convert single-profile entries to multi-profile format
+        const multiEntries: ComposeMultiProfileEntry[] = entries.map(e => {
+          const contract = availableContracts.get(e.contractName);
+          return {
+            ...e,
+            profileName: currentProfile,
+            profileOverrides: contract?.target?.profileOverrides
+              ? this.resolveConfigValues(contract.target.profileOverrides, resolvedPool)
+              : undefined,
+          };
+        });
+        const result = await writeMultiProfileComposeFile(
+          filePath, multiEntries, profileNames, profileSuffixes, composeName
+        );
         warnings.push(...result.warnings);
         generatedFiles.push(filePath);
       }
