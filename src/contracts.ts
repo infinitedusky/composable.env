@@ -51,6 +51,16 @@ export interface ServiceContract {
   secret?: Record<string, string>;
 
   defaults?: Record<string, string>;
+
+  // Default profile handling:
+  //   default: ".env"         → write default profile output to this filename instead of .env.default
+  //   default: ".env.blahblah" → write to .env.blahblah instead of .env.default
+  //   If no default profile exists, uses [default] sections from components (skips unresolvable vars)
+  default?: string;
+
+  // If true, skip the default profile entirely for this contract (no .env.default written)
+  ignoreDefault?: boolean;
+
   dev?: ServiceDevConfig; // How to run this service locally (for ce start)
   persistent?: boolean;   // If true, target goes to persistent compose file (survives rebuild cycles)
 }

@@ -250,6 +250,10 @@ secrets (.env.secrets.shared + .env.secrets.local)
 - `dev` defines how `pnpm ce pm2:start` runs this service via PM2
 - `onlyProfiles` — optional array of ce profile names. If set, the contract is only included when building one of those profiles. Useful for dev-only services (log aggregators, debug tools) that shouldn't exist in production builds
 - `includeVars` — array of var set names to inherit. Resolves `*.vars.json` files from `env/contracts/`. Merged left-to-right, contract's own vars win on conflict
+- `default` — optional string (e.g., `".env"`, `".env.base"`). Controls how the default profile is written for this contract:
+  - If a `default` profile exists: writes to this filename instead of `.env.default`
+  - If no `default` profile exists: builds using only `[default]` sections from components, skips unresolvable vars, writes to this filename
+- `ignoreDefault` — optional boolean. If `true`, skip the default profile entirely for this contract (no `.env.default` written even if a default profile exists)
 
 ### Var sets (`*.vars.json`)
 
