@@ -828,7 +828,7 @@ export class EnvironmentBuilder {
 
       if (useNewFormat) {
         // New format: component-scoped pool + secrets layer
-        componentPool = await this.loadScopedComponentPool(profile.components, profileName || 'default');
+        componentPool = await this.loadScopedComponentPool(profile.components, profileName || 'default', isDefaultWithoutProfile);
 
         // Inject service.* pseudo-component with auto-generated vars
         const config = loadConfig(this.configDir);
@@ -851,7 +851,7 @@ export class EnvironmentBuilder {
         await this.loadSharedFiles(flatPool);
       }
 
-      const resolvedPool = this.resolveVariables(flatPool);
+      const resolvedPool = this.resolveVariables(flatPool, isDefaultWithoutProfile);
 
       // Rebuild componentPool from resolved values for validation
       const resolvedComponentPool = componentPool
@@ -1118,7 +1118,8 @@ export class EnvironmentBuilder {
    */
   private async loadScopedComponentPool(
     components: Components,
-    _profileName: string
+    _profileName: string,
+    quiet: boolean = false
   ): Promise<Map<string, Record<string, string>>> {
     const pool = new Map<string, Record<string, string>>();
 
@@ -1167,7 +1168,7 @@ export class EnvironmentBuilder {
     this.resolveSecretsInComponents(pool);
 
     // Pass 2: resolve cross-component ${component.KEY} references
-    this.resolveCrossComponentRefs(pool);
+    this.resolveCrossComponentRefs(pool, quiet);
 
     // .env.local overrides (flat names applied to matching component keys)
     const envDir = path.join(this.configDir, 'env');
@@ -1210,7 +1211,7 @@ export class EnvironmentBuilder {
   /**
    * Resolve cross-component references like ${database.HOST} in component values.
    */
-  private resolveCrossComponentRefs(pool: Map<string, Record<string, string>>): void {
+  private resolveCrossComponentRefs(pool: Map<string, Record<string, string>>, quiet: boolean = false): void {
     const maxPasses = 10;
     let pass = 0;
     let hasUnresolved = true;
@@ -1262,7 +1263,7 @@ export class EnvironmentBuilder {
         }
         if (stillUnresolved) break;
       }
-      if (stillUnresolved) {
+      if (stillUnresolved && !quiet) {
         console.warn(`⚠️ Cross-component resolution hit ${maxPasses} passes — possible circular reference.`);
       }
     }
@@ -1490,7 +1491,7 @@ export class EnvironmentBuilder {
     }
   }
 
-  private resolveVariables(vars: Record<string, string>): Record<string, string> {
+  private resolveVariables(vars: Record<string, string>, quiet: boolean = false): Record<string, string> {
     const resolved = { ...vars };
     const maxPasses = 10;
     let pass = 0;
@@ -1517,14 +1518,16 @@ export class EnvironmentBuilder {
       }
     }
 
-    if (pass >= maxPasses) {
-      console.warn(`⚠️ Variable resolution hit ${maxPasses} passes — possible circular reference.`);
-    }
+    if (!quiet) {
+      if (pass >= maxPasses) {
+        console.warn(`⚠️ Variable resolution hit ${maxPasses} passes — possible circular reference.`);
+      }
 
-    for (const [key, value] of Object.entries(resolved)) {
-      if (typeof value === 'string' && /\$\{([^}]+)\}/.test(value)) {
-        const unresolved = value.match(/\$\{([^}]+)\}/g) || [];
-        console.warn(`⚠️ Unresolved variables in ${key}: ${unresolved.join(', ')}`);
+      for (const [key, value] of Object.entries(resolved)) {
+        if (typeof value === 'string' && /\$\{([^}]+)\}/.test(value)) {
+          const unresolved = value.match(/\$\{([^}]+)\}/g) || [];
+          console.warn(`⚠️ Unresolved variables in ${key}: ${unresolved.join(', ')}`);
+        }
       }
     }
 
