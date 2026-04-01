@@ -40,13 +40,11 @@ export function registerUpCommand(program: Command): void {
     .description('Build env and start Docker Compose services for a profile')
     .argument('[profile]', 'Profile name')
     .option('-p, --profile <name>', 'Profile name (alternative to positional arg)')
-    .option('--no-build-env', 'Skip ce build step')
     .option('--no-build-image', 'Skip Docker image build (no --build flag)')
     .action(async (
       positional: string | undefined,
       options: {
         profile?: string;
-        buildEnv: boolean;
         buildImage: boolean;
       }
     ) => {
@@ -54,18 +52,7 @@ export function registerUpCommand(program: Command): void {
       const config = loadConfig(cwd);
       const profile = resolveProfile(options.profile, positional, cwd, config);
 
-      // 1. Build env files + compose file
-      if (options.buildEnv) {
-        console.log(chalk.blue(`Building environment for profile: ${profile}...`));
-        try {
-          execSync(`npx ce env:build ${profile}`, { cwd, stdio: 'inherit' });
-        } catch {
-          console.error(chalk.red('Failed to build environment.'));
-          process.exit(1);
-        }
-      }
-
-      // 2. Find compose file
+      // 1. Find compose file
       const composeFile = findComposeFile(cwd);
       if (!composeFile) {
         console.error(chalk.red('No docker-compose.yml found. Run ce build first.'));
