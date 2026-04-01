@@ -801,9 +801,16 @@ export class EnvironmentBuilder {
       const allContracts = this.contracts.getContracts();
       const currentProfile = profileName || 'default';
 
+      // When building "default" without a real default profile, only contracts
+      // with the `default` field set should be included — others have nothing to build.
+      const isDefaultWithoutProfile = currentProfile === 'default' &&
+        !fs.existsSync(path.join(this.configDir, this.envDir, 'profiles', 'default.json'));
+
       // Filter contracts by onlyProfiles — skip contracts that don't apply to this profile
       const availableContracts = new Map(
         [...allContracts].filter(([, contract]) => {
+          if (isDefaultWithoutProfile && !contract.default) return false;
+          if (contract.ignoreDefault && currentProfile === 'default') return false;
           if (!contract.onlyProfiles || contract.onlyProfiles.length === 0) return true;
           return contract.onlyProfiles.includes(currentProfile);
         })
