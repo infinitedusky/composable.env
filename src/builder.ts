@@ -686,17 +686,17 @@ export class EnvironmentBuilder {
 
           // In serve mode, merge serve.config on top of target.config for matching services
           let effectiveConfig = contract.target.config;
-          const serveConfig = contract.serve?.config;
-          const isServed = serveMode && serveConfig &&
+          const isServed = serveMode &&
             (serveMode === 'all' || serveMode.has(serviceName));
-          if (isServed && effectiveConfig) {
-            effectiveConfig = { ...effectiveConfig, ...serveConfig };
-          } else if (isServed) {
-            effectiveConfig = serveConfig;
-          }
 
-          // In serve mode, force NODE_ENV=production so the entrypoint runs start, not dev
           if (isServed) {
+            const serveConfig = contract.serve?.config;
+            if (serveConfig && effectiveConfig) {
+              effectiveConfig = { ...effectiveConfig, ...serveConfig };
+            } else if (serveConfig) {
+              effectiveConfig = serveConfig;
+            }
+            // Force NODE_ENV=production so the entrypoint runs start, not dev
             serviceVars['NODE_ENV'] = 'production';
           }
 
