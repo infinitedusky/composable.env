@@ -20,21 +20,22 @@ export function extractApps(
   const apps: AppConfig[] = [];
 
   for (const [, contract] of contracts) {
-    if (!contract.dev) continue;
-
-    // Target contracts (e.g., docker-compose) are container-managed, not PM2-managed
+    // Target-only contracts (docker-compose) are container-managed, not PM2-managed
     if (contract.target && !contract.location) continue;
+    // Need a location to know where to run
+    if (!contract.location) continue;
 
-    const cwd = contract.dev.cwd || contract.location || '.';
-    const label = contract.dev.label || contract.name;
+    // dev is optional — defaults: command=pnpm dev, label=name, cwd=location
+    const command = contract.dev?.command || 'pnpm dev';
+    const cwd = contract.dev?.cwd || contract.location;
+    const label = contract.dev?.label || contract.name;
     const absoluteCwd = cwd.startsWith('/') ? cwd : path.join(projectRoot, cwd);
 
-    const envLocation = contract.location || '.';
-    const envFile = path.join(projectRoot, envLocation, `.env.${profile}`);
+    const envFile = path.join(projectRoot, contract.location, `.env.${profile}`);
 
     apps.push({
       name: contract.name,
-      command: contract.dev.command,
+      command,
       cwd: absoluteCwd,
       envFile,
       label,

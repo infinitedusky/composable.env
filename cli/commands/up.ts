@@ -74,8 +74,15 @@ export function registerUpCommand(program: Command): void {
         // Each build only gets its OWN contract's env vars — not all contracts.
         // This prevents vars like NODE_OPTIONS from one contract polluting another's build.
         for (const [serviceName, contract] of contracts) {
-          if (!contract.serve?.build) continue;
           if (serveServices !== 'all' && !serveServices.has(serviceName)) continue;
+          if (!contract.target) continue;
+
+          // Derive build command: serve.build > turbo build --filter={command}
+          const buildCmd = contract.serve?.build
+            || (contract.target.config?.command
+              ? `turbo build --filter=${contract.target.config.command as string}`
+              : null);
+          if (!buildCmd) continue;
 
           // Load only this contract's env file
           const contractEnv: Record<string, string> = {};
@@ -94,9 +101,9 @@ export function registerUpCommand(program: Command): void {
             }
           }
 
-          console.log(chalk.blue(`  Building ${serviceName}: ${contract.serve.build}`));
+          console.log(chalk.blue(`  Building ${serviceName}: ${buildCmd}`));
           try {
-            execSync(contract.serve.build, {
+            execSync(buildCmd, {
               cwd,
               stdio: 'inherit',
               env: { ...process.env, ...contractEnv },
