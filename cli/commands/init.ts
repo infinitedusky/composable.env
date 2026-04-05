@@ -142,8 +142,10 @@ export function registerInitCommand(program: Command): void {
       // Scaffold a complete project template
       if (options.scaffold === 'docker') {
         scaffoldDocker(cwd, envDir);
+        saveConfig(cwd, { scaffold: 'docker' });
       } else if (options.scaffold === 'vitepress') {
         scaffoldVitepress(cwd, envDir);
+        saveConfig(cwd, { scaffold: 'vitepress' });
       } else if (options.scaffold && !['docker', 'vitepress'].includes(options.scaffold)) {
         console.log(chalk.yellow(`  Unknown scaffold type: ${options.scaffold}. Available: docker, vitepress`));
       }
@@ -168,6 +170,31 @@ export function registerInitCommand(program: Command): void {
         console.log(`  6. Add local overrides to ${envDir}/.env.local  (gitignored)`);
         console.log('  7. Run: pnpm ce env:build --profile <name>');
       }
+    });
+
+  program
+    .command('scaffold:sync')
+    .description('Re-run scaffold to create any missing files (reads scaffold type from ce.json)')
+    .action(() => {
+      const cwd = process.cwd();
+      const config = loadConfig(cwd);
+
+      if (!config.scaffold) {
+        console.error(chalk.red('No scaffold type in ce.json.'));
+        console.error(chalk.gray('   Run "pnpm ce init --scaffold docker" first.'));
+        process.exit(1);
+      }
+
+      console.log(chalk.blue(`Syncing scaffold: ${config.scaffold}`));
+      if (config.scaffold === 'docker') {
+        scaffoldDocker(cwd, config.envDir);
+      } else if (config.scaffold === 'vitepress') {
+        scaffoldVitepress(cwd, config.envDir);
+      } else {
+        console.error(chalk.red(`Unknown scaffold type: ${config.scaffold}`));
+        process.exit(1);
+      }
+      console.log(chalk.green('Scaffold sync complete.'));
     });
 }
 

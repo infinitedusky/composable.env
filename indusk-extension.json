@@ -23,7 +23,7 @@
     "on_init": "pnpm ce add-skill",
     "on_health_check": "docker compose ps --filter status=running",
     "on_onboard": "pnpm ce status",
-    "on_post_update": "pnpm ce add-skill"
+    "on_post_update": "pnpm ce add-skill && pnpm ce scaffold:sync"
   },
   "detect": {
     "file": "ce.json"

@@ -104,6 +104,7 @@ export const CeConfigSchema = z.object({
   envDir: z.string().default('env'),
   defaultProfile: z.string().default('default'),
   profiles: z.record(z.string(), CeProfileConfigSchema).optional(),
+  scaffold: z.string().optional(),
 }).strict();
 
 export type CeConfig = z.infer<typeof CeConfigSchema>;
