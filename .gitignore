@@ -4,3 +4,6 @@ dist/
 
 # composable.env personal overrides
 env/.env.local
+
+# Generated env files
+apps/**/.env.*
