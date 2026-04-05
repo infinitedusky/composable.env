@@ -70,34 +70,36 @@ export function registerUpCommand(program: Command): void {
         await contractManager.initialize();
         const contracts = contractManager.getContracts();
 
-        // Collect env vars from all .env.{profile} files
-        const envFromProfile: Record<string, string> = {};
-        for (const [, contract] of contracts) {
-          if (!contract.location) continue;
-          const contractEnvFile = path.join(cwd, contract.location, `.env.${profile}`);
-          if (fs.existsSync(contractEnvFile)) {
-            const content = fs.readFileSync(contractEnvFile, 'utf8');
-            for (const line of content.split('\n')) {
-              const trimmed = line.trim();
-              if (!trimmed || trimmed.startsWith('#')) continue;
-              const eqIdx = trimmed.indexOf('=');
-              if (eqIdx > 0) {
-                envFromProfile[trimmed.substring(0, eqIdx)] = trimmed.substring(eqIdx + 1);
-              }
-            }
-          }
-        }
-
         // Run host-side builds for matching contracts
+        // Each build only gets its OWN contract's env vars — not all contracts.
+        // This prevents vars like NODE_OPTIONS from one contract polluting another's build.
         for (const [serviceName, contract] of contracts) {
           if (!contract.serve?.build) continue;
           if (serveServices !== 'all' && !serveServices.has(serviceName)) continue;
+
+          // Load only this contract's env file
+          const contractEnv: Record<string, string> = {};
+          if (contract.location) {
+            const envFile = path.join(cwd, contract.location, `.env.${profile}`);
+            if (fs.existsSync(envFile)) {
+              const content = fs.readFileSync(envFile, 'utf8');
+              for (const line of content.split('\n')) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('#')) continue;
+                const eqIdx = trimmed.indexOf('=');
+                if (eqIdx > 0) {
+                  contractEnv[trimmed.substring(0, eqIdx)] = trimmed.substring(eqIdx + 1);
+                }
+              }
+            }
+          }
+
           console.log(chalk.blue(`  Building ${serviceName}: ${contract.serve.build}`));
           try {
             execSync(contract.serve.build, {
               cwd,
               stdio: 'inherit',
-              env: { ...process.env, ...envFromProfile },
+              env: { ...process.env, ...contractEnv },
             });
           } catch {
             console.error(chalk.red(`  Failed to build ${serviceName}`));
