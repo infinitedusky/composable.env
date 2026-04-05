@@ -63,6 +63,14 @@ export interface ServiceContract {
 
   dev?: ServiceDevConfig; // How to run this service locally (for ce start)
   persistent?: boolean;   // If true, target goes to persistent compose file (survives rebuild cycles)
+
+  // Serve mode: build the app on the host, then run in Docker with a production-like config.
+  // Used by dc:up --serve. build runs on the host with profile env vars loaded.
+  // config overrides target.config for the Docker service (e.g., different Dockerfile, no volumes).
+  serve?: {
+    build: string;                          // Host-side build command (e.g., "turbo build --filter=myapp")
+    config?: Record<string, unknown>;       // Docker config overrides (merged on top of target.config)
+  };
 }
 
 /**

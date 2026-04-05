@@ -9,14 +9,19 @@ export function registerBuildCommand(program: Command): void {
     .alias('build')
     .description('Build .env files for a single profile')
     .argument('<profile>', 'Profile name to build (e.g., local, production, default)')
-    .action(async (profile: string) => {
+    .option('--serve [services...]', 'Apply serve config overrides. Optionally specify service names, or omit for all.')
+    .action(async (profile: string, options: { serve?: boolean | string[] }) => {
       const configDir = process.cwd();
       const config = loadConfig(configDir);
       const builder = new EnvironmentBuilder(configDir, '.env', profile, config.envDir);
 
       try {
         console.log(chalk.blue(`Building from profile: ${profile}`));
-        const result = await builder.buildFromProfile(profile);
+        // Convert serve option to set of service names or 'all'
+        const serveMode = options.serve === true ? 'all' as const
+          : Array.isArray(options.serve) ? new Set(options.serve)
+          : undefined;
+        const result = await builder.buildFromProfile(profile, serveMode);
 
         printResult(result);
       } catch (error) {

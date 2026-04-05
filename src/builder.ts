@@ -49,7 +49,7 @@ export class EnvironmentBuilder {
    * Profile JSON files are optional — they provide section overrides per component.
    * For each component: [default] section + [profileName] section(s) layer on top.
    */
-  async buildFromProfile(profileName: string): Promise<BuildResult> {
+  async buildFromProfile(profileName: string, serveMode?: Set<string> | 'all'): Promise<BuildResult> {
     try {
       await this.initialize();
 
@@ -133,7 +133,7 @@ export class EnvironmentBuilder {
         ? Object.fromEntries(Object.entries(ceConfig.profiles).map(([name, cfg]) => [name, cfg.suffix]))
         : undefined;
 
-      return this.buildServiceEnvironments(profileData, profileName, profileSuffixes, ceConfig.profiles);
+      return this.buildServiceEnvironments(profileData, profileName, profileSuffixes, ceConfig.profiles, serveMode ?? undefined);
     } catch (error) {
       return {
         success: false,
@@ -500,7 +500,8 @@ export class EnvironmentBuilder {
     profile: Profile,
     profileName?: string,
     profileSuffixes?: Record<string, string>,
-    profileConfigs?: Record<string, CeProfileConfig>
+    profileConfigs?: Record<string, CeProfileConfig>,
+    serveMode?: Set<string> | 'all'
   ): Promise<BuildResult> {
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -684,12 +685,23 @@ export class EnvironmentBuilder {
             }
           }
 
+          // In serve mode, merge serve.config on top of target.config for matching services
+          let effectiveConfig = contract.target.config;
+          const serveConfig = contract.serve?.config;
+          const isServed = serveMode && serveConfig &&
+            (serveMode === 'all' || serveMode.has(serviceName));
+          if (isServed && effectiveConfig) {
+            effectiveConfig = { ...effectiveConfig, ...serveConfig };
+          } else if (isServed) {
+            effectiveConfig = serveConfig;
+          }
+
           composeGroups.get(filePath)!.push({
             contractName: serviceName,
             serviceName: contract.target.service,
             vars: serviceVars,
-            config: contract.target.config
-              ? this.resolveConfigValues(contract.target.config, resolvedPool)
+            config: effectiveConfig
+              ? this.resolveConfigValues(effectiveConfig, resolvedPool)
               : undefined,
           });
         }
