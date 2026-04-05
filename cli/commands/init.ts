@@ -248,18 +248,7 @@ function scaffoldDocker(cwd: string, envDir: string): void {
     console.log(chalk.green(`  created ${envDir}/components/networking.env`));
   }
 
-  // ── networking vars contract ──
-  const networkingVarsPath = path.join(cwd, envDir, 'contracts', 'networking.vars.json');
-  if (!fs.existsSync(networkingVarsPath)) {
-    fs.writeFileSync(networkingVarsPath, JSON.stringify({
-      vars: {
-        DOMAIN: '${networking.DOMAIN}',
-        PROFILE_SUFFIX: '${networking.PROFILE_SUFFIX}',
-        BASE_URL: '${networking.BASE_URL}',
-      },
-    }, null, 2) + '\n');
-    console.log(chalk.green(`  created ${envDir}/contracts/networking.vars.json`));
-  }
+
 
   // ── docker directory with Dockerfiles ──
   const dockerDir = path.join(cwd, 'docker');
@@ -416,7 +405,6 @@ function scaffoldDocker(cwd: string, envDir: string): void {
           },
         },
       },
-      includeVars: ['networking'],
       vars: {
         PORT: '${example-app.PORT}',
         NODE_ENV: '${example-app.NODE_ENV}',
@@ -516,7 +504,6 @@ function scaffoldDocker(cwd: string, envDir: string): void {
           },
         },
       },
-      includeVars: ['networking'],
       vars: {
         PORT: '${docs.PORT}',
       },

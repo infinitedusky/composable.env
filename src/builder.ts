@@ -12,7 +12,6 @@ import {
 } from './types.js';
 import { ContractManager, isNewFormatContract } from './contracts.js';
 import {
-  writeDockerComposeFile,
   writeMultiProfileComposeFile,
   type ComposeServiceEntry,
   type ComposeMultiProfileEntry,
@@ -694,6 +693,11 @@ export class EnvironmentBuilder {
             effectiveConfig = { ...effectiveConfig, ...serveConfig };
           } else if (isServed) {
             effectiveConfig = serveConfig;
+          }
+
+          // In serve mode, force NODE_ENV=production so the entrypoint runs start, not dev
+          if (isServed) {
+            serviceVars['NODE_ENV'] = 'production';
           }
 
           composeGroups.get(filePath)!.push({
