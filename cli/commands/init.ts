@@ -333,6 +333,35 @@ function scaffoldDocker(cwd: string, envDir: string): void {
     console.log(chalk.green('  created docker/Dockerfile.nextprod'));
   }
 
+  // Dockerfile for Next.js serve mode — host-built output, served in container
+  const dockerfileServePath = path.join(dockerDir, 'Dockerfile.nextserve');
+  if (!fs.existsSync(dockerfileServePath)) {
+    fs.writeFileSync(dockerfileServePath,
+      '# Next.js serve mode — app is pre-built on the host via dc:up --serve\n' +
+      '# No source code in image, no volume mounts. Just serves the built output.\n' +
+      'FROM node:20-alpine\n' +
+      '\n' +
+      'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
+      '\n' +
+      'WORKDIR /app\n' +
+      '\n' +
+      '# Install production dependencies only\n' +
+      'COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\n' +
+      'COPY apps/ ./apps/\n' +
+      'COPY packages/ ./packages/\n' +
+      'RUN pnpm install --frozen-lockfile\n' +
+      '\n' +
+      '# The .next build output is already on disk from the host build.\n' +
+      '# No volume mounts — the built files are copied in via the Docker context.\n' +
+      '\n' +
+      '# Entrypoint detects NODE_ENV=production and runs pnpm start\n' +
+      'COPY docker/app-entrypoint.sh /usr/local/bin/app-entrypoint.sh\n' +
+      'ENV NODE_ENV=production\n' +
+      'ENTRYPOINT ["/usr/local/bin/app-entrypoint.sh"]\n'
+    );
+    console.log(chalk.green('  created docker/Dockerfile.nextserve'));
+  }
+
   // ── Example app contract with Docker target ──
   const exampleContractPath = path.join(cwd, envDir, 'contracts', 'example-app.contract.json');
   if (!fs.existsSync(exampleContractPath)) {
@@ -368,6 +397,13 @@ function scaffoldDocker(cwd: string, envDir: string): void {
       defaults: {
         PORT: '3000',
         NODE_ENV: 'development',
+      },
+      serve: {
+        build: 'turbo build --filter=@project/example-app',
+        config: {
+          build: { context: '.', dockerfile: 'docker/Dockerfile.nextserve' },
+          volumes: [],
+        },
       },
     }, null, 2) + '\n');
     console.log(chalk.green(`  created ${envDir}/contracts/example-app.contract.json`));
