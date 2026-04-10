@@ -41,12 +41,14 @@ export function registerUpCommand(program: Command): void {
     .argument('[profile]', 'Profile name')
     .option('-p, --profile <name>', 'Profile name (alternative to positional arg)')
     .option('--no-build-image', 'Skip Docker image build (no --build flag)')
+    .option('--no-cache', 'Force rebuild from scratch (no Docker cache)')
     .option('--serve [services...]', 'Run host-side builds then start with serve config. Optionally specify service names, or omit for all.')
     .action(async (
       positional: string | undefined,
       options: {
         profile?: string;
         buildImage: boolean;
+        noCache?: boolean;
         serve?: boolean | string[];
       }
     ) => {
@@ -147,16 +149,24 @@ export function registerUpCommand(program: Command): void {
 
       // 3. Up with profile
       const buildFlag = options.buildImage ? ' --build' : '';
+      const noCacheFlag = options.noCache ? ' --no-cache' : '';
       console.log(chalk.blue(`Starting ${profile} services...`));
       try {
         execSync(
-          `docker compose -f ${composeFile} --profile ${profile} up -d${buildFlag}`,
+          `docker compose -f ${composeFile} --profile ${profile} up -d${buildFlag}${noCacheFlag} --remove-orphans`,
           { cwd, stdio: 'inherit' }
         );
         console.log(chalk.green(`\nServices running with profile: ${profile}`));
       } catch {
         console.error(chalk.red('Failed to start Docker Compose services.'));
         process.exit(1);
+      }
+
+      // 4. Prune dangling images to reclaim disk space
+      try {
+        execSync('docker image prune -f', { cwd, stdio: 'pipe' });
+      } catch {
+        // Non-critical — don't fail if prune errors
       }
     });
 
