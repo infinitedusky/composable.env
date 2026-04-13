@@ -129,6 +129,60 @@ export function registerUpCommand(program: Command): void {
         }
       }
 
+      // TLS: generate mkcert certs if profile has tls: true
+      const profileConfig = config.profiles?.[profile];
+      if (profileConfig?.tls && profileConfig?.domain) {
+        const domain = profileConfig.domain;
+        const certDir = path.join(cwd, '.certs', domain);
+        const certFile = path.join(certDir, 'cert.pem');
+
+        if (!fs.existsSync(certFile)) {
+          console.log(chalk.blue(`Generating TLS certs for *.${domain}...`));
+
+          // Check mkcert is installed
+          try {
+            execSync('mkcert -version', { stdio: 'pipe' });
+          } catch {
+            console.error(chalk.red('mkcert is not installed. Install with: brew install mkcert'));
+            console.error(chalk.gray('Then run: mkcert -install'));
+            process.exit(1);
+          }
+
+          if (!fs.existsSync(certDir)) {
+            fs.mkdirSync(certDir, { recursive: true });
+          }
+
+          try {
+            // Generate wildcard cert + copy rootCA
+            execSync(
+              `mkcert -cert-file "${path.join(certDir, 'cert.pem')}" -key-file "${path.join(certDir, 'key.pem')}" "*.${domain}" "${domain}"`,
+              { cwd, stdio: 'inherit' }
+            );
+
+            // Copy rootCA.pem so containers can trust it
+            const caRoot = execSync('mkcert -CAROOT', { encoding: 'utf8' }).trim();
+            const rootCA = path.join(caRoot, 'rootCA.pem');
+            if (fs.existsSync(rootCA)) {
+              fs.copyFileSync(rootCA, path.join(certDir, 'rootCA.pem'));
+            }
+
+            console.log(chalk.green(`  Certs generated in .certs/${domain}/`));
+
+            // Gitignore .certs/
+            const gitignorePath = path.join(cwd, '.gitignore');
+            if (fs.existsSync(gitignorePath)) {
+              const content = fs.readFileSync(gitignorePath, 'utf8');
+              if (!content.includes('.certs/')) {
+                fs.writeFileSync(gitignorePath, content + '\n.certs/\n');
+              }
+            }
+          } catch {
+            console.error(chalk.red('Failed to generate TLS certs.'));
+            process.exit(1);
+          }
+        }
+      }
+
       // 1. Find compose file
       const composeFile = findComposeFile(cwd);
       if (!composeFile) {

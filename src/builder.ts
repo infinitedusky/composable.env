@@ -700,6 +700,30 @@ export class EnvironmentBuilder {
             serviceVars['NODE_ENV'] = 'production';
           }
 
+          // TLS: inject cert volume mount and NODE_EXTRA_CA_CERTS when profile has tls: true
+          const ceConfig = loadConfig(this.configDir);
+          const currentProfileConfig = ceConfig.profiles?.[currentProfile];
+          if (currentProfileConfig?.tls && currentProfileConfig?.domain) {
+            const domain = currentProfileConfig.domain;
+            const certDir = `.certs/${domain}`;
+
+            // Add cert volume mount
+            if (effectiveConfig) {
+              const volumes = (effectiveConfig.volumes as string[]) || [];
+              const certMount = `./${certDir}:/app/.certs:ro`;
+              if (!volumes.includes(certMount)) {
+                effectiveConfig = { ...effectiveConfig, volumes: [...volumes, certMount] };
+              }
+            }
+
+            // Inject NODE_EXTRA_CA_CERTS so containers trust the local CA
+            serviceVars['NODE_EXTRA_CA_CERTS'] = '/app/.certs/rootCA.pem';
+
+            // Signal to entrypoint that TLS certs are available
+            serviceVars['CE_TLS_CERT'] = '/app/.certs/cert.pem';
+            serviceVars['CE_TLS_KEY'] = '/app/.certs/key.pem';
+          }
+
           composeGroups.get(filePath)!.push({
             contractName: serviceName,
             serviceName: contract.target.service,

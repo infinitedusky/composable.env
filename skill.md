@@ -176,7 +176,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 
 | Command | Alias | Purpose |
 |---------|-------|---------|
-| `pnpm ce init` | — | Scaffold env/ directory and ce.json. `--scaffold docker` adds Docker + Next.js + VitePress setup. |
+| `pnpm ce init` | — | Scaffold env/ directory and ce.json. `--scaffold docker` adds Docker + Next.js + VitePress setup. `--scaffold vitepress` for VitePress only. |
 | `pnpm ce env:build <profile>` | `pnpm ce build <profile>` | Build .env files for a single profile (required argument). If docker-compose targets exist, compose file includes all profiles. |
 | `pnpm ce env:build:all` | `pnpm ce build:all` | Build .env files for all profiles. |
 | `pnpm ce profile:list` | `pnpm ce p:list` | Show components, profiles, contracts |
@@ -189,9 +189,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 | `pnpm ce persistent:down` | — | Stop persistent services (preserves volumes) |
 | `pnpm ce persistent:destroy` | — | Stop persistent services and remove volumes |
 | `pnpm ce persistent:status` | — | Show persistent service status |
-| `pnpm ce vault init` | — | Initialize age-encrypted vault |
-| `pnpm ce vault set KEY=VALUE` | — | Encrypt a secret |
-| `pnpm ce vault get KEY` | — | Decrypt a secret |
+| `pnpm ce vault <subcommand>` | — | Optional encrypted secrets. Subcommands: `init`, `set <key> <value>`, `get <key>`, `ls`, `add`, `remove`, `recipients` |
 | `pnpm ce migrate` | — | Convert legacy format to vars format |
 | `pnpm ce add-skill` | — | Install Claude Code skill |
 | `pnpm ce uninstall` | — | Remove all ce artifacts |
@@ -205,7 +203,8 @@ secrets (.env.secrets.shared + .env.secrets.local)
   "profiles": {
     "local": {
       "suffix": "-local",
-      "domain": "myproject.orb.local"
+      "domain": "myproject.orb.local",
+      "tls": true
     },
     "production": {
       "suffix": "",
@@ -220,8 +219,8 @@ secrets (.env.secrets.shared + .env.secrets.local)
 
 - `envDir` — custom env directory (default: `"env"`)
 - `defaultProfile` — default when no `--profile` flag
-- `profiles` — per-profile config: `suffix` (compose service name suffix), `domain` (for auto-generated `${service.*}` vars), `override` (per-service suffix/domain overrides)
-- Profile resolution: `--profile` flag > `CE_PROFILE` env var > `ce.json defaultProfile` > `"default"`
+- `profiles` — per-profile config: `suffix` (compose service name suffix), `domain` (for auto-generated `${service.*}` vars), `tls` (auto-generate mkcert certs, inject into containers), `override` (per-service suffix/domain overrides)
+- Profile resolution: `--profile` flag > `CE_PROFILE` env var (legacy: `CENV_PROFILE`) > `ce.json defaultProfile` > `"default"`
 
 ## Contract format
 
@@ -249,7 +248,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 - Right side = **always** a `${component.KEY}` reference. Contracts only reference components, never secrets directly. Secrets flow through components (`${secrets.KEY}` in a component, `${component.KEY}` in a contract).
 - `defaults` is the **only** place for hardcoded values in a contract — static fallbacks like `LOG_LEVEL=info`. Everything in `vars` should be a `${component.KEY}` reference so values vary by profile.
 - `defaults` provides fallbacks for unresolvable vars
-- `dev` defines how `pnpm ce pm2:start` runs this service via PM2
+- `dev` defines how `pnpm ce pm2:start` runs this service via PM2. Fields: `command` (required), `label` (optional display name), `cwd` (optional working directory)
 - `onlyProfiles` — optional array of ce profile names. If set, the contract is only included when building one of those profiles. Useful for dev-only services (log aggregators, debug tools) that shouldn't exist in production builds
 - `includeVars` — array of var set names to inherit. Resolves `*.vars.json` files from `env/contracts/`. Merged left-to-right, contract's own vars win on conflict
 - `default` — optional string (e.g., `".env"`, `".env.base"`). Controls how the default profile is written for this contract:
@@ -593,12 +592,27 @@ When `ce.json` has profile configs with `domain`, ce auto-generates a `service` 
 # game-server.env
 [default]
 PORT=3665
-URL=http://${service.game-server.address}:${game-server.PORT}
+URL=${service.game-server.protocol}://${service.game-server.address}:${game-server.PORT}
 ```
 
 **Per-service overrides:** The `override` map lets specific services have different suffixes or domains. In the example above, `admin` has no suffix in local — `${service.admin.host}` resolves to `admin`, not `admin-local`.
 
 Components can still override service vars by defining the same key explicitly — the auto-generated values are defaults that components and contracts build on top of.
+
+### Automatic TLS with mkcert
+
+When a profile has `tls: true` and a `domain`, `pnpm ce dc:up` automatically:
+
+1. **Generates mkcert certs** — wildcard cert for `*.{domain}` in `.certs/{domain}/`
+2. **Mounts certs into containers** — adds `.certs/{domain}:/app/.certs:ro` volume to all target services
+3. **Sets `NODE_EXTRA_CA_CERTS`** — so containers trust the local CA for service-to-service HTTPS calls
+4. **Sets `CE_TLS_CERT` and `CE_TLS_KEY`** — the app-entrypoint.sh detects these and passes `--experimental-https` flags to Next.js dev
+
+Prerequisites: `brew install mkcert && mkcert -install`
+
+The `.certs/` directory is auto-gitignored. Certs are only generated once — subsequent `dc:up` calls skip cert generation if they already exist.
+
+Use `${service.*.protocol}` in components to get `https` when `tls: true`, `http` otherwise. This way the same component works for both TLS and non-TLS profiles.
 
 ## Turbo + Docker: env var passthrough
 

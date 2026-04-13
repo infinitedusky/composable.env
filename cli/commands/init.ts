@@ -268,14 +268,27 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
       '#\n' +
       '# Usage: docker-compose command field passes the pnpm filter name:\n' +
       '#   command: "@myorg/myapp"\n' +
+      '#\n' +
+      '# TLS: when CE_TLS_CERT and CE_TLS_KEY are set (by composable.env tls: true),\n' +
+      '# Next.js dev gets --experimental-https with the provided certs.\n' +
       '\n' +
       'APP_FILTER="$1"\n' +
+      '\n' +
+      '# Build HTTPS flags if certs are available\n' +
+      'HTTPS_FLAGS=""\n' +
+      'if [ -n "$CE_TLS_CERT" ] && [ -f "$CE_TLS_CERT" ]; then\n' +
+      '  HTTPS_FLAGS="--experimental-https --experimental-https-cert $CE_TLS_CERT --experimental-https-key $CE_TLS_KEY"\n' +
+      'fi\n' +
       '\n' +
       'if [ "$NODE_ENV" = "production" ]; then\n' +
       '  pnpm --filter "$APP_FILTER" build\n' +
       '  exec pnpm --filter "$APP_FILTER" start\n' +
       'else\n' +
-      '  exec pnpm --filter "$APP_FILTER" dev\n' +
+      '  if [ -n "$HTTPS_FLAGS" ]; then\n' +
+      '    exec pnpm --filter "$APP_FILTER" dev $HTTPS_FLAGS\n' +
+      '  else\n' +
+      '    exec pnpm --filter "$APP_FILTER" dev\n' +
+      '  fi\n' +
       'fi\n'
     );
     fs.chmodSync(entrypointPath, 0o755);
