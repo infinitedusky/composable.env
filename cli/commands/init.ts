@@ -315,13 +315,18 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
   if (!fs.existsSync(dockerfileDevPath)) {
     fs.writeFileSync(dockerfileDevPath,
       '# Next.js local development — hot reload via volume mounts\n' +
-      '# Usage: volume-mount your app source into /app\n' +
+      '# Stage 1: Build Caddy with tls_redirect plugin for single-port HTTP→HTTPS\n' +
+      'FROM golang:1.23-alpine AS caddy-builder\n' +
+      'RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest\n' +
+      'RUN xcaddy build --with github.com/caddyserver/caddy-l4\n' +
+      '\n' +
+      '# Stage 2: App runtime\n' +
       'FROM node:20-alpine\n' +
       '\n' +
       'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
       '\n' +
-      '# Install Caddy for TLS termination (used when ce.json profile has tls: true)\n' +
-      'RUN apk add --no-cache caddy\n' +
+      '# Copy custom Caddy with tls_redirect (for TLS termination when tls: true)\n' +
+      'COPY --from=caddy-builder /go/caddy /usr/bin/caddy\n' +
       '\n' +
       'WORKDIR /app\n' +
       '\n' +
@@ -433,12 +438,16 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
   if (!fs.existsSync(dockerfileVitepressDevPath)) {
     fs.writeFileSync(dockerfileVitepressDevPath,
       '# VitePress local development — hot reload via volume mounts\n' +
+      '# Stage 1: Build Caddy with tls_redirect plugin\n' +
+      'FROM golang:1.23-alpine AS caddy-builder\n' +
+      'RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest\n' +
+      'RUN xcaddy build --with github.com/caddyserver/caddy-l4\n' +
+      '\n' +
+      '# Stage 2: App runtime\n' +
       'FROM node:20-alpine\n' +
       '\n' +
       'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
-      '\n' +
-      '# Caddy for TLS termination (used when ce.json profile has tls: true)\n' +
-      'RUN apk add --no-cache caddy\n' +
+      'COPY --from=caddy-builder /go/caddy /usr/bin/caddy\n' +
       '\n' +
       'WORKDIR /app\n' +
       '\n' +
