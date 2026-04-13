@@ -316,7 +316,7 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
     fs.writeFileSync(dockerfileDevPath,
       '# Next.js local development — hot reload via volume mounts\n' +
       '# Stage 1: Build Caddy with tls_redirect plugin for single-port HTTP→HTTPS\n' +
-      'FROM golang:1.23-alpine AS caddy-builder\n' +
+      'FROM golang:1.25-alpine AS caddy-builder\n' +
       'RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest\n' +
       'RUN xcaddy build --with github.com/caddyserver/caddy-l4\n' +
       '\n' +
@@ -439,7 +439,7 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
     fs.writeFileSync(dockerfileVitepressDevPath,
       '# VitePress local development — hot reload via volume mounts\n' +
       '# Stage 1: Build Caddy with tls_redirect plugin\n' +
-      'FROM golang:1.23-alpine AS caddy-builder\n' +
+      'FROM golang:1.25-alpine AS caddy-builder\n' +
       'RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest\n' +
       'RUN xcaddy build --with github.com/caddyserver/caddy-l4\n' +
       '\n' +
