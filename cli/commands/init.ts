@@ -269,28 +269,39 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
       '# Usage: docker-compose command field passes the pnpm filter name:\n' +
       '#   command: "@myorg/myapp"\n' +
       '#\n' +
-      '# TLS: when CE_TLS_CERT and CE_TLS_KEY are set (by composable.env tls: true),\n' +
-      '# Next.js dev is called directly with --experimental-https flags.\n' +
-      '# pnpm --filter doesn\'t pass these flags correctly (-- separator issue).\n' +
+      '# TLS: when CE_TLS_CERT/CE_TLS_KEY/CE_TLS_PORT are set (by composable.env tls: true),\n' +
+      '# Caddy runs as a TLS termination proxy on the public port.\n' +
+      '# The app runs on PORT (shifted to +10000 by ce build).\n' +
+      '# Caddy handles HTTP→HTTPS redirect + WebSocket upgrade on one port.\n' +
       '\n' +
       'APP_FILTER="$1"\n' +
+      '\n' +
+      '# Start Caddy TLS proxy if certs are available\n' +
+      'if [ -n "$CE_TLS_CERT" ] && [ -f "$CE_TLS_CERT" ] && [ -n "$CE_TLS_PORT" ] && command -v caddy >/dev/null 2>&1; then\n' +
+      '  # Generate Caddyfile for this container\n' +
+      '  cat > /tmp/Caddyfile <<CADDYEOF\n' +
+      '{\n' +
+      '  auto_https off\n' +
+      '  servers {\n' +
+      '    listener_wrappers {\n' +
+      '      tls_redirect\n' +
+      '      tls\n' +
+      '    }\n' +
+      '  }\n' +
+      '}\n' +
+      '\n' +
+      ':${CE_TLS_PORT} {\n' +
+      '  tls ${CE_TLS_CERT} ${CE_TLS_KEY}\n' +
+      '  reverse_proxy localhost:${PORT}\n' +
+      '}\n' +
+      'CADDYEOF\n' +
+      '  caddy start --config /tmp/Caddyfile --adapter caddyfile\n' +
+      '  echo "Caddy TLS proxy: :${CE_TLS_PORT} → :${PORT}"\n' +
+      'fi\n' +
       '\n' +
       'if [ "$NODE_ENV" = "production" ]; then\n' +
       '  pnpm --filter "$APP_FILTER" build\n' +
       '  exec pnpm --filter "$APP_FILTER" start\n' +
-      'elif [ -n "$CE_TLS_CERT" ] && [ -f "$CE_TLS_CERT" ]; then\n' +
-      '  # TLS mode: find the app directory and call next dev directly\n' +
-      '  # pnpm --filter can\'t pass --experimental-https flags correctly\n' +
-      '  APP_DIR=$(pnpm --filter "$APP_FILTER" exec pwd 2>/dev/null | tail -1)\n' +
-      '  if [ -z "$APP_DIR" ]; then\n' +
-      '    echo "Could not find directory for $APP_FILTER"\n' +
-      '    exit 1\n' +
-      '  fi\n' +
-      '  cd "$APP_DIR"\n' +
-      '  exec npx next dev -p "${PORT:-3000}" \\\n' +
-      '    --experimental-https \\\n' +
-      '    --experimental-https-cert "$CE_TLS_CERT" \\\n' +
-      '    --experimental-https-key "$CE_TLS_KEY"\n' +
       'else\n' +
       '  exec pnpm --filter "$APP_FILTER" dev\n' +
       'fi\n'
@@ -308,6 +319,9 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
       'FROM node:20-alpine\n' +
       '\n' +
       'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
+      '\n' +
+      '# Install Caddy for TLS termination (used when ce.json profile has tls: true)\n' +
+      'RUN apk add --no-cache caddy\n' +
       '\n' +
       'WORKDIR /app\n' +
       '\n' +
@@ -422,6 +436,9 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
       'FROM node:20-alpine\n' +
       '\n' +
       'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
+      '\n' +
+      '# Caddy for TLS termination (used when ce.json profile has tls: true)\n' +
+      'RUN apk add --no-cache caddy\n' +
       '\n' +
       'WORKDIR /app\n' +
       '\n' +

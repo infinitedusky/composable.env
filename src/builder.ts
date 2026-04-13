@@ -700,7 +700,8 @@ export class EnvironmentBuilder {
             serviceVars['NODE_ENV'] = 'production';
           }
 
-          // TLS: inject cert volume mount and NODE_EXTRA_CA_CERTS when profile has tls: true
+          // TLS: Caddy-based TLS termination when profile has tls: true
+          // Caddy listens on the public PORT, app shifts to PORT+10000
           const ceConfig = loadConfig(this.configDir);
           const currentProfileConfig = ceConfig.profiles?.[currentProfile];
           if (currentProfileConfig?.tls && currentProfileConfig?.domain) {
@@ -719,9 +720,17 @@ export class EnvironmentBuilder {
             // Inject NODE_EXTRA_CA_CERTS so containers trust the local CA
             serviceVars['NODE_EXTRA_CA_CERTS'] = '/app/.certs/rootCA.pem';
 
-            // Signal to entrypoint that TLS certs are available
+            // Signal to entrypoint that Caddy TLS is enabled
             serviceVars['CE_TLS_CERT'] = '/app/.certs/cert.pem';
             serviceVars['CE_TLS_KEY'] = '/app/.certs/key.pem';
+
+            // Shift PORT: public port stays the same (Caddy), app moves to +10000
+            const publicPort = serviceVars['PORT'];
+            if (publicPort && /^\d+$/.test(publicPort)) {
+              const internalPort = String(parseInt(publicPort, 10) + 10000);
+              serviceVars['CE_TLS_PORT'] = publicPort;
+              serviceVars['PORT'] = internalPort;
+            }
           }
 
           composeGroups.get(filePath)!.push({
