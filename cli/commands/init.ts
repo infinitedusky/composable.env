@@ -270,25 +270,29 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
       '#   command: "@myorg/myapp"\n' +
       '#\n' +
       '# TLS: when CE_TLS_CERT and CE_TLS_KEY are set (by composable.env tls: true),\n' +
-      '# Next.js dev gets --experimental-https with the provided certs.\n' +
+      '# Next.js dev is called directly with --experimental-https flags.\n' +
+      '# pnpm --filter doesn\'t pass these flags correctly (-- separator issue).\n' +
       '\n' +
       'APP_FILTER="$1"\n' +
-      '\n' +
-      '# Build HTTPS flags if certs are available\n' +
-      'HTTPS_FLAGS=""\n' +
-      'if [ -n "$CE_TLS_CERT" ] && [ -f "$CE_TLS_CERT" ]; then\n' +
-      '  HTTPS_FLAGS="--experimental-https --experimental-https-cert $CE_TLS_CERT --experimental-https-key $CE_TLS_KEY"\n' +
-      'fi\n' +
       '\n' +
       'if [ "$NODE_ENV" = "production" ]; then\n' +
       '  pnpm --filter "$APP_FILTER" build\n' +
       '  exec pnpm --filter "$APP_FILTER" start\n' +
-      'else\n' +
-      '  if [ -n "$HTTPS_FLAGS" ]; then\n' +
-      '    exec pnpm --filter "$APP_FILTER" dev $HTTPS_FLAGS\n' +
-      '  else\n' +
-      '    exec pnpm --filter "$APP_FILTER" dev\n' +
+      'elif [ -n "$CE_TLS_CERT" ] && [ -f "$CE_TLS_CERT" ]; then\n' +
+      '  # TLS mode: find the app directory and call next dev directly\n' +
+      '  # pnpm --filter can\'t pass --experimental-https flags correctly\n' +
+      '  APP_DIR=$(pnpm --filter "$APP_FILTER" exec pwd 2>/dev/null | tail -1)\n' +
+      '  if [ -z "$APP_DIR" ]; then\n' +
+      '    echo "Could not find directory for $APP_FILTER"\n' +
+      '    exit 1\n' +
       '  fi\n' +
+      '  cd "$APP_DIR"\n' +
+      '  exec npx next dev -p "${PORT:-3000}" \\\n' +
+      '    --experimental-https \\\n' +
+      '    --experimental-https-cert "$CE_TLS_CERT" \\\n' +
+      '    --experimental-https-key "$CE_TLS_KEY"\n' +
+      'else\n' +
+      '  exec pnpm --filter "$APP_FILTER" dev\n' +
       'fi\n'
     );
     fs.chmodSync(entrypointPath, 0o755);
