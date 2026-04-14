@@ -724,12 +724,10 @@ export class EnvironmentBuilder {
             serviceVars['CE_TLS_CERT'] = '/app/.certs/cert.pem';
             serviceVars['CE_TLS_KEY'] = '/app/.certs/key.pem';
 
-            // Shift PORT: public port stays the same (Caddy), app moves to +10000
+            // Signal TLS is active — PORT stays unchanged, Caddy runs on 443/80
             const publicPort = serviceVars['PORT'];
             if (publicPort && /^\d+$/.test(publicPort)) {
-              const internalPort = String(parseInt(publicPort, 10) + 10000);
               serviceVars['CE_TLS_PORT'] = publicPort;
-              serviceVars['PORT'] = internalPort;
             }
           }
 
