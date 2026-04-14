@@ -269,34 +269,31 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
       '# Usage: docker-compose command field passes the pnpm filter name:\n' +
       '#   command: "@myorg/myapp"\n' +
       '#\n' +
-      '# TLS: when CE_TLS_CERT/CE_TLS_KEY/CE_TLS_PORT are set (by composable.env tls: true),\n' +
-      '# Caddy runs as a TLS termination proxy on the public port.\n' +
-      '# The app runs on PORT (shifted to +10000 by ce build).\n' +
-      '# Caddy handles HTTP→HTTPS redirect + WebSocket upgrade on one port.\n' +
+      '# TLS: when CE_TLS_PORT is set (by composable.env tls: true),\n' +
+      '# Caddy runs on :443 (HTTPS) and :80 (HTTP redirect).\n' +
+      '# The app runs on its normal PORT via plain HTTP internally.\n' +
+      '# OrbStack routes https://service.domain to :443, http:// to :80.\n' +
       '\n' +
       'APP_FILTER="$1"\n' +
       '\n' +
       '# Start Caddy TLS proxy if certs are available\n' +
       'if [ -n "$CE_TLS_CERT" ] && [ -f "$CE_TLS_CERT" ] && [ -n "$CE_TLS_PORT" ] && command -v caddy >/dev/null 2>&1; then\n' +
-      '  # Generate Caddyfile for this container\n' +
       '  cat > /tmp/Caddyfile <<CADDYEOF\n' +
       '{\n' +
       '  auto_https off\n' +
-      '  servers {\n' +
-      '    listener_wrappers {\n' +
-      '      tls_redirect\n' +
-      '      tls\n' +
-      '    }\n' +
-      '  }\n' +
       '}\n' +
       '\n' +
-      ':${CE_TLS_PORT} {\n' +
+      ':443 {\n' +
       '  tls ${CE_TLS_CERT} ${CE_TLS_KEY}\n' +
       '  reverse_proxy localhost:${PORT}\n' +
       '}\n' +
+      '\n' +
+      ':80 {\n' +
+      '  redir https://{host}{uri} permanent\n' +
+      '}\n' +
       'CADDYEOF\n' +
       '  caddy start --config /tmp/Caddyfile --adapter caddyfile\n' +
-      '  echo "Caddy TLS proxy: :${CE_TLS_PORT} → :${PORT}"\n' +
+      '  echo "Caddy TLS: :443 → :${PORT}, :80 → redirect"\n' +
       'fi\n' +
       '\n' +
       'if [ "$NODE_ENV" = "production" ]; then\n' +
@@ -315,19 +312,12 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
   if (!fs.existsSync(dockerfileDevPath)) {
     fs.writeFileSync(dockerfileDevPath,
       '# Next.js local development — hot reload via volume mounts\n' +
-      '# Stage 1: Build Caddy with tls_redirect plugin for single-port HTTP→HTTPS\n' +
-      'FROM golang:1.25-alpine AS caddy-builder\n' +
-      'RUN apk add --no-cache git\n' +
-      'RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest\n' +
-      'RUN xcaddy build --with github.com/mholt/caddy-l4\n' +
-      '\n' +
-      '# Stage 2: App runtime\n' +
       'FROM node:20-alpine\n' +
       '\n' +
       'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
       '\n' +
-      '# Copy custom Caddy with tls_redirect (for TLS termination when tls: true)\n' +
-      'COPY --from=caddy-builder /go/caddy /usr/bin/caddy\n' +
+      '# Caddy for TLS termination (:443 HTTPS, :80 HTTP redirect)\n' +
+      'RUN apk add --no-cache caddy\n' +
       '\n' +
       'WORKDIR /app\n' +
       '\n' +
@@ -439,17 +429,10 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
   if (!fs.existsSync(dockerfileVitepressDevPath)) {
     fs.writeFileSync(dockerfileVitepressDevPath,
       '# VitePress local development — hot reload via volume mounts\n' +
-      '# Stage 1: Build Caddy with tls_redirect plugin\n' +
-      'FROM golang:1.25-alpine AS caddy-builder\n' +
-      'RUN apk add --no-cache git\n' +
-      'RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest\n' +
-      'RUN xcaddy build --with github.com/mholt/caddy-l4\n' +
-      '\n' +
-      '# Stage 2: App runtime\n' +
       'FROM node:20-alpine\n' +
       '\n' +
       'RUN corepack enable && corepack prepare pnpm@latest --activate\n' +
-      'COPY --from=caddy-builder /go/caddy /usr/bin/caddy\n' +
+      'RUN apk add --no-cache caddy\n' +
       '\n' +
       'WORKDIR /app\n' +
       '\n' +
