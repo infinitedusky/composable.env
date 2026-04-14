@@ -319,7 +319,7 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
       'FROM golang:1.25-alpine AS caddy-builder\n' +
       'RUN apk add --no-cache git\n' +
       'RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest\n' +
-      'RUN xcaddy build --with github.com/caddyserver/caddy-l4\n' +
+      'RUN xcaddy build --with github.com/mholt/caddy-l4\n' +
       '\n' +
       '# Stage 2: App runtime\n' +
       'FROM node:20-alpine\n' +
@@ -443,7 +443,7 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
       'FROM golang:1.25-alpine AS caddy-builder\n' +
       'RUN apk add --no-cache git\n' +
       'RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest\n' +
-      'RUN xcaddy build --with github.com/caddyserver/caddy-l4\n' +
+      'RUN xcaddy build --with github.com/mholt/caddy-l4\n' +
       '\n' +
       '# Stage 2: App runtime\n' +
       'FROM node:20-alpine\n' +
