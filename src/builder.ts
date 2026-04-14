@@ -724,11 +724,8 @@ export class EnvironmentBuilder {
             serviceVars['CE_TLS_CERT'] = '/app/.certs/cert.pem';
             serviceVars['CE_TLS_KEY'] = '/app/.certs/key.pem';
 
-            // Signal TLS is active — PORT stays unchanged, Caddy runs on 443/80
-            const publicPort = serviceVars['PORT'];
-            if (publicPort && /^\d+$/.test(publicPort)) {
-              serviceVars['CE_TLS_PORT'] = publicPort;
-            }
+            // Signal TLS is active for all services — entrypoint starts Caddy
+            serviceVars['CE_TLS_PORT'] = serviceVars['PORT'] || 'true';
           }
 
           composeGroups.get(filePath)!.push({
