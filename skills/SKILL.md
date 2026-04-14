@@ -606,10 +606,12 @@ When a profile has `tls: true` and a `domain`, `pnpm ce dc:up` automatically:
 1. **Generates mkcert certs** — wildcard cert for `*.{domain}` in `.certs/{domain}/`
 2. **Mounts certs into containers** — adds `.certs/{domain}:/app/.certs:ro` volume to all target services
 3. **Sets `NODE_EXTRA_CA_CERTS`** — so containers trust the local CA for service-to-service HTTPS calls
-4. **Starts Caddy TLS proxy** — Caddy listens on the public PORT with the mkcert cert, handles HTTP→HTTPS redirect on a single port via `tls_redirect` listener wrapper, and reverse proxies to the app on PORT+10000
-5. **Shifts PORT** — the app's PORT moves to +10000 (e.g., 3333 → 13333), Caddy listens on the original port
+4. **Sets `CE_TLS_PORT`** on all services — signals the entrypoint to start Caddy
+5. **Starts Caddy TLS proxy** — `:443` serves HTTPS (reverse proxies to app on its normal PORT), `:80` redirects HTTP to HTTPS
 
-The dev Dockerfiles include `RUN apk add --no-cache caddy`. The app-entrypoint.sh generates a Caddyfile at runtime and starts Caddy before the app. This is local dev only — production profiles without `tls: true` don't get any of this.
+The app keeps its original PORT — no shifting. Caddy runs on well-known ports (443/80). OrbStack routes `https://service.domain` to `:443` and `http://` to `:80`. Matches production (load balancer on 443/80).
+
+Dev Dockerfiles include `RUN apk add --no-cache caddy` (standard package, no custom build). The app-entrypoint.sh generates a Caddyfile at runtime and starts Caddy before the app. This is local dev only — production profiles without `tls: true` don't get any of this.
 
 Prerequisites: `brew install mkcert && mkcert -install`
 
