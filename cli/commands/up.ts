@@ -216,9 +216,10 @@ export function registerUpCommand(program: Command): void {
         process.exit(1);
       }
 
-      // 4. Prune dangling images to reclaim disk space
+      // 4. Prune dangling images and old build cache to reclaim disk space
       try {
         execSync('docker image prune -f', { cwd, stdio: 'pipe' });
+        execSync('docker builder prune -f --filter until=24h', { cwd, stdio: 'pipe' });
       } catch {
         // Non-critical — don't fail if prune errors
       }
