@@ -210,30 +210,18 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
     console.log(chalk.green(`  created ${envDir}/profiles/production.json`));
   }
 
-  // ── networking component ──
-  const networkingPath = path.join(cwd, envDir, 'components', 'networking.env');
-  if (!fs.existsSync(networkingPath)) {
-    fs.writeFileSync(networkingPath,
-      '; networking.env — DNS and routing per environment\n' +
-      '; OrbStack provides automatic .orb.local DNS for Docker containers\n' +
-      ';\n' +
-      '; Service names in docker-compose become hostnames:\n' +
-      ';   myapp-local → myapp-local.orb.local (from host)\n' +
-      ';   myapp-local → myapp-local (container-to-container)\n\n' +
-      '[default]\n' +
-      'DOMAIN=localhost\n' +
-      'PROFILE_SUFFIX=-local\n' +
-      'BASE_URL=http://localhost\n\n' +
-      '[local]\n' +
-      'DOMAIN=orb.local\n' +
-      'PROFILE_SUFFIX=-local\n' +
-      'BASE_URL=http://localhost\n\n' +
-      '[production]\n' +
-      'DOMAIN=example.com\n' +
-      'PROFILE_SUFFIX=\n' +
-      'BASE_URL=https://example.com\n'
-    );
-    console.log(chalk.green(`  created ${envDir}/components/networking.env`));
+  // ── ce.json profile defaults (suffix + domain) ──
+  // Replaces the old networking.env component — that data lives in ce.json now.
+  // Only adds defaults if profiles aren't already configured (don't clobber).
+  const existingConfig = loadConfig(cwd);
+  if (!existingConfig.profiles) {
+    saveConfig(cwd, {
+      profiles: {
+        local: { suffix: '-local', domain: 'orb.local' },
+        production: { suffix: '', domain: 'example.com' },
+      },
+    });
+    console.log(chalk.green('  added profile defaults to ce.json'));
   }
 
 
