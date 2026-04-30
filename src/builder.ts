@@ -885,7 +885,7 @@ export class EnvironmentBuilder {
   }
 
   /**
-   * Load .env.shared (team) and .env.local (personal) from env/ root.
+   * Load .env.shared (team) from env/ root and decrypt vault entries.
    * Used for legacy format.
    */
   private async loadSharedFiles(pool: Record<string, string>): Promise<void> {
@@ -901,11 +901,6 @@ export class EnvironmentBuilder {
       const { Vault } = await import('./vault.js');
       const vault = new Vault(this.configDir, this.envDir);
       await vault.decryptPool(pool);
-    }
-
-    const localPath = path.join(envDir, '.env.local');
-    if (fs.existsSync(localPath)) {
-      Object.assign(pool, this.loadEnvFile(localPath));
     }
   }
 
@@ -969,20 +964,6 @@ export class EnvironmentBuilder {
 
     // Pass 2: resolve cross-component ${component.KEY} references
     this.resolveCrossComponentRefs(pool, quiet);
-
-    // .env.local overrides (flat names applied to matching component keys)
-    const envDir = path.join(this.configDir, 'env');
-    const localPath = path.join(envDir, '.env.local');
-    if (fs.existsSync(localPath)) {
-      const localOverrides = this.loadEnvFile(localPath);
-      for (const [key, value] of Object.entries(localOverrides)) {
-        for (const [, componentVars] of pool) {
-          if (key in componentVars) {
-            componentVars[key] = value;
-          }
-        }
-      }
-    }
 
     return pool;
   }

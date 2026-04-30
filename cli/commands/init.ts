@@ -77,22 +77,11 @@ export function registerInitCommand(program: Command): void {
         console.log(chalk.green(`  created ${envDir}/.env.secrets.local`));
       }
 
-      // Scaffold .env.local (personal non-secret overrides)
-      const localPath = path.join(cwd, envDir, '.env.local');
-      if (!fs.existsSync(localPath)) {
-        fs.writeFileSync(
-          localPath,
-          '# Personal overrides — DO NOT commit this file (gitignored)\n' +
-            '# Applied last, overrides everything else\n'
-        );
-        console.log(chalk.green(`  created ${envDir}/.env.local`));
-      }
-
       // Scaffold .gitignore with markers
       const gitignorePath = path.join(cwd, '.gitignore');
       const gitignoreEntries = [
         `${envDir}/.env.secrets.local`,
-        `${envDir}/.env.local`,
+        `${envDir}/.env.secrets.shared`,
         `${envDir}/execution/*.cjs`,
         '# Legacy patterns',
         '.ce.*',
@@ -136,7 +125,7 @@ export function registerInitCommand(program: Command): void {
 
       // Scaffold example files when --examples is passed
       if (options.examples) {
-        scaffoldExamples(cwd, envDir, secretsSharedPath, secretsLocalPath, localPath);
+        scaffoldExamples(cwd, envDir, secretsSharedPath, secretsLocalPath);
       }
 
       // Scaffold a complete project template
@@ -167,8 +156,7 @@ export function registerInitCommand(program: Command): void {
         console.log(`  3. Add contract files to ${envDir}/contracts/  (optional)`);
         console.log('  4. Set up vault for secrets: pnpm ce vault init');
         console.log('  5. Add secrets: pnpm ce vault set <KEY> <VALUE>');
-        console.log(`  6. Add local overrides to ${envDir}/.env.local  (gitignored)`);
-        console.log('  7. Run: pnpm ce env:build --profile <name>');
+        console.log('  6. Run: pnpm ce env:build --profile <name>');
       }
     });
 
@@ -657,8 +645,7 @@ function scaffoldExamples(
   cwd: string,
   envDir: string,
   secretsSharedPath: string,
-  secretsLocalPath: string,
-  localPath: string
+  secretsLocalPath: string
 ): void {
   console.log('');
   console.log(chalk.blue('Scaffolding examples...'));
@@ -753,11 +740,6 @@ function scaffoldExamples(
     'DB_HOST=localhost\n' +
     'REDIS_HOST=localhost\n';
 
-  const exampleLocal =
-    '# Personal overrides — DO NOT commit this file (gitignored)\n\n' +
-    '# Verbose logging during development\n' +
-    'LOG_LEVEL=debug\n';
-
   // Write components
   for (const [filename, content] of Object.entries(exampleComponents)) {
     const filePath = path.join(cwd, envDir, 'components', filename);
@@ -788,6 +770,4 @@ function scaffoldExamples(
   console.log(chalk.green(`  updated ${envDir}/.env.secrets.shared with example values`));
   fs.writeFileSync(secretsLocalPath, exampleSecretsLocal);
   console.log(chalk.green(`  updated ${envDir}/.env.secrets.local with example overrides`));
-  fs.writeFileSync(localPath, exampleLocal);
-  console.log(chalk.green(`  updated ${envDir}/.env.local with example overrides`));
 }
