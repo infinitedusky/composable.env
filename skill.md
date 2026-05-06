@@ -249,6 +249,8 @@ secrets (.env.secrets.shared + .env.secrets.local)
 - `defaults` is the **only** place for hardcoded values in a contract — static fallbacks like `LOG_LEVEL=info`. Everything in `vars` should be a `${component.KEY}` reference so values vary by profile.
 - `defaults` provides fallbacks for unresolvable vars
 - `dev` defines how `pnpm ce pm2:start` runs this service via PM2. Fields: `command` (required), `label` (optional display name), `cwd` (optional working directory)
+- `location` accepts: `"apps/api"` (relative to project root, default), `"/abs/path"` (absolute), or `"~/foo"` (`~` expands to `$HOME`). Use absolute or `~` paths to write env files outside the project tree (e.g., to a tool's config directory).
+- `outputs` — optional map of profile name → output filename or path. When set, writes `${location}/${outputs[profile]}` instead of the default `${location}/.env.${profile}`. Profile names not in the map fall back to the default. The output value can be relative (joined with `location`), absolute, or `~`-prefixed. Useful for tools that expect specific filenames like `t.cyux.xy.env` or `service.env.prod`.
 - `onlyProfiles` — optional array of ce profile names. If set, the contract is only included when building one of those profiles. Useful for dev-only services (log aggregators, debug tools) that shouldn't exist in production builds
 - `includeVars` — array of var set names to inherit. Resolves `*.vars.json` files from `env/contracts/`. Merged left-to-right, contract's own vars win on conflict
 - `default` — optional string (e.g., `".env"`, `".env.base"`). Controls how the default profile is written for this contract:

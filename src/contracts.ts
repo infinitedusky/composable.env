@@ -31,8 +31,21 @@ export interface ContractTarget {
 
 export interface ServiceContract {
   name: string;
-  location?: string;         // Where to write the .env file (e.g., "apps/api")
+  // Where to write the .env file. Accepts:
+  //   "apps/api"      — relative to project root (default behavior)
+  //   "/abs/path"     — absolute path anywhere on disk
+  //   "~/.config/foo" — ~ expands to $HOME
+  location?: string;
   target?: ContractTarget;   // Alternative to location — write into a target file
+
+  // Per-profile output filename overrides. Keys are profile names, values are
+  // filenames (or full paths). Resolution rules:
+  //   1. If outputs[profile] is set, use it. Relative paths are resolved
+  //      relative to `location`; absolute and ~-prefixed paths are honored as-is.
+  //   2. Otherwise fall back to `${location}/.env.${profile}`.
+  // Example:
+  //   "outputs": { "local": "t.cyux.xy.env", "production": "service.env.prod" }
+  outputs?: Record<string, string>;
 
   // Profile filtering: only include this contract when building these ce profiles.
   // If omitted, the contract is included for all profiles.

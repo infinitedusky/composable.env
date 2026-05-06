@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as ini from 'ini';
 import * as yaml from 'yaml';
@@ -18,6 +19,29 @@ import {
 } from './targets/docker-compose.js';
 import { writeNginxConfigs } from './targets/nginx.js';
 import { loadConfig } from './config.js';
+
+/**
+ * Expand a leading ~ to the user's home directory. Other paths pass through.
+ */
+function expandHome(p: string): string {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
+
+/**
+ * Resolve a contract output path.
+ *   - Absolute paths and ~-prefixed paths are honored as-is.
+ *   - Relative paths are joined with `base`.
+ *
+ * Used for both `location` (resolved against project root) and `outputs[profile]`
+ * (resolved against `location`).
+ */
+function resolveContractPath(p: string, base: string): string {
+  const expanded = expandHome(p);
+  if (path.isAbsolute(expanded)) return expanded;
+  return path.join(base, expanded);
+}
 
 export class EnvironmentBuilder {
   private configDir: string;
@@ -628,11 +652,15 @@ export class EnvironmentBuilder {
         // A contract can have location, target, or both
 
         if (contract.location) {
+          // Resolve the location root (handles absolute paths and ~ expansion)
+          const locationRoot = resolveContractPath(contract.location, this.configDir);
+
           // Handle default profile redirects and ignores
           if (currentProfile === 'default') {
             if (contract.ignoreDefault) continue;
             if (contract.default) {
-              const outputPath = `${contract.location}/${contract.default}`;
+              // contract.default is treated as a filename relative to location
+              const outputPath = resolveContractPath(contract.default, locationRoot);
               const outputDir = path.dirname(outputPath);
               if (!fs.existsSync(outputDir)) {
                 await fs.promises.mkdir(outputDir, { recursive: true });
@@ -645,7 +673,11 @@ export class EnvironmentBuilder {
             }
           }
 
-          const outputPath = `${contract.location}/.env.${currentProfile}`;
+          // Per-profile output filename override, with fallback to .env.{profile}
+          const outputOverride = contract.outputs?.[currentProfile];
+          const outputPath = outputOverride
+            ? resolveContractPath(outputOverride, locationRoot)
+            : path.join(locationRoot, `.env.${currentProfile}`);
           const outputDir = path.dirname(outputPath);
           if (!fs.existsSync(outputDir)) {
             await fs.promises.mkdir(outputDir, { recursive: true });
