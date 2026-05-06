@@ -46,6 +46,17 @@ Resolution rules:
 
 Both `location` and `outputs[profile]` paths get the same expansion treatment.
 
+## Backwards compatibility
+
+Purely additive. Every existing contract keeps working with no changes:
+
+- No `outputs` field → today's `${location}/.env.${profile}` behavior.
+- `location: "apps/api"` → still relative to project root, same output path.
+- `location: "/abs/path"` → already works as a side effect, just becomes
+  documented.
+
+Existing projects can adopt the new fields one contract at a time, or never.
+
 ## Why this matters
 
 - Tools with non-standard filenames (Cypress fixtures, AWS Lambda layers,
