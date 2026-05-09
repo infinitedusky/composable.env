@@ -177,12 +177,13 @@ secrets (.env.secrets.shared + .env.secrets.local)
 | Command | Alias | Purpose |
 |---------|-------|---------|
 | `pnpm ce init` | — | Scaffold env/ directory and ce.json. `--scaffold docker` adds Docker + Next.js + VitePress setup. `--scaffold vitepress` for VitePress only. |
-| `pnpm ce env:build <profile>` | `pnpm ce build <profile>` | Build .env files for a single profile (required argument). If docker-compose targets exist, compose file includes all profiles. |
+| `pnpm ce scaffold:sync` | — | Re-run scaffold (reads `scaffold` type from ce.json). Creates missing files and re-generates Dockerfiles to pick up new app contracts. Never overwrites user customizations to non-generated files. |
+| `pnpm ce env:build <profile>` | `pnpm ce build <profile>` | Build .env files for a single profile (required argument). If docker-compose targets exist, compose file includes all profiles. Pass `--serve [services...]` to apply serve config overrides. |
 | `pnpm ce env:build:all` | `pnpm ce build:all` | Build .env files for all profiles. |
 | `pnpm ce profile:list` | `pnpm ce p:list` | Show components, profiles, contracts |
-| `pnpm ce pm2:start [profile]` | `pnpm ce start` | Build + launch PM2 dev environment |
-| `pnpm ce dc:up [profile]` | `pnpm ce up` | Build env, then `docker compose --profile X down && up -d --build` |
-| `pnpm ce dc:down [profile]` | `pnpm ce down` | Stop Docker Compose services for a profile |
+| `pnpm ce pm2:start [profile]` | `pnpm ce start` | Build env + launch PM2 for contracts with `target.type: "pm2"` (or legacy `dev` field) |
+| `pnpm ce dc:up [profile]` | `pnpm ce up` | `docker compose --profile X down && up -d --build --remove-orphans`, then prune dangling images and build cache older than 24h. Flags: `--no-cache` (force full rebuild), `--serve [services...]` (host-side build then run serve config). Does NOT auto-run env:build — run that separately if you changed env files. |
+| `pnpm ce dc:down [profile]` | `pnpm ce down` | Stop Docker Compose services for a profile (`-v` to also remove volumes) |
 | `pnpm ce dc:logs [profile]` | `pnpm ce logs` | Tail Docker Compose logs (`--service X` for one service) |
 | `pnpm ce dc:ps [profile]` | `pnpm ce ps` | Show Docker Compose service status |
 | `pnpm ce persistent:up` | — | Start persistent services (detached) |
@@ -219,7 +220,12 @@ secrets (.env.secrets.shared + .env.secrets.local)
 
 - `envDir` — custom env directory (default: `"env"`)
 - `defaultProfile` — default when no `--profile` flag
-- `profiles` — per-profile config: `suffix` (compose service name suffix), `domain` (for auto-generated `${service.*}` vars), `tls` (auto-generate mkcert certs, inject into containers), `override` (per-service suffix/domain overrides)
+- `scaffold` — set automatically by `ce init --scaffold <type>`. Tells `scaffold:sync` which template to re-run.
+- `profiles` — per-profile config:
+  - `suffix` — compose service name suffix (e.g. `"-local"`, `""`, `"-stg"`)
+  - `domain` — used for auto-generated `${service.*.address}`. If it ends in `.orb.local`, the first segment becomes the docker-compose project name (so OrbStack DNS matches what ce resolves).
+  - `tls` — auto-generate mkcert certs, inject into all containers, run Caddy on :443/:80 (local dev only).
+  - `override` — per-service suffix/domain overrides (e.g. `"admin": { "suffix": "" }` keeps admin unsuffixed in this profile).
 - Profile resolution: `--profile` flag > `CE_PROFILE` env var (legacy: `CENV_PROFILE`) > `ce.json defaultProfile` > `"default"`
 
 ## Contract format
@@ -260,6 +266,8 @@ secrets (.env.secrets.shared + .env.secrets.local)
   - If a `default` profile exists: writes to this filename instead of `.env.default`
   - If no `default` profile exists: builds using only `[default]` sections from components, skips unresolvable vars, writes to this filename
 - `ignoreDefault` — optional boolean. If `true`, skip the default profile entirely for this contract (no `.env.default` written even if a default profile exists)
+- `persistent` — optional boolean (docker-compose targets only). If `true`, this service goes into a separate `docker-compose.persistent.yml` file. Used for databases, caches, and other long-lived containers managed via `pnpm ce persistent:*` commands so they survive normal `dc:up` rebuild cycles.
+- `serve` — optional. Used by `dc:up --serve <name>` to run a host-side build then start the container with overrides. Shape: `{ "build": "turbo build --filter=@org/api", "config": { "build": { "dockerfile": "..." }, "volumes": [] } }`. The `build` command runs on the host (with that contract's env vars loaded). `config` overrides `target.config` for the rebuilt compose file. ce auto-sets `NODE_ENV=production` for served services.
 
 ### Var sets (`*.vars.json`)
 
