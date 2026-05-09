@@ -482,7 +482,7 @@ export class EnvironmentBuilder {
     vars['default.protocol'] = defaultProtocol;
 
     for (const [, contract] of contracts) {
-      if (!contract.target) continue;
+      if (contract.target?.type !== 'docker-compose') continue;
       const svcName = contract.target.service;
 
       // Per-service overrides from ce.json
@@ -689,7 +689,7 @@ export class EnvironmentBuilder {
           generatedFiles.push(outputPath);
         }
 
-        if (contract.target) {
+        if (contract.target?.type === 'docker-compose') {
           // Docker-compose target — collect entries grouped by file
           // Persistent contracts go to a separate compose file
           const baseFilePath = contract.target.file;
@@ -789,11 +789,12 @@ export class EnvironmentBuilder {
         // Convert single-profile entries to multi-profile format
         const multiEntries: ComposeMultiProfileEntry[] = entries.map(e => {
           const contract = availableContracts.get(e.contractName);
+          const dcTarget = contract?.target?.type === 'docker-compose' ? contract.target : undefined;
           return {
             ...e,
             profileName: currentProfile,
-            profileOverrides: contract?.target?.profileOverrides
-              ? this.resolveConfigValues(contract.target.profileOverrides, resolvedPool)
+            profileOverrides: dcTarget?.profileOverrides
+              ? this.resolveConfigValues(dcTarget.profileOverrides, resolvedPool)
               : undefined,
           };
         });

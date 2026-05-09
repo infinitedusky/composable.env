@@ -10,7 +10,13 @@ export interface AppConfig {
 }
 
 /**
- * Extract PM2 app configs from contracts that have a `dev` field.
+ * Extract PM2 app configs from contracts that explicitly opt in via:
+ *   - target.type: "pm2" (preferred), or
+ *   - top-level `dev` field (legacy, still supported)
+ *
+ * Contracts with only `location` (env file output) are NOT auto-added.
+ * Pure env contracts (datadog, observability extensions, etc.) shouldn't
+ * spawn a process just because they declare an env file destination.
  */
 export function extractApps(
   contracts: Map<string, ServiceContract>,
@@ -20,16 +26,31 @@ export function extractApps(
   const apps: AppConfig[] = [];
 
   for (const [, contract] of contracts) {
-    // Target-only contracts (docker-compose) are container-managed, not PM2-managed
-    if (contract.target && !contract.location) continue;
-    // Need a location to know where to run
+    // Resolve the runtime spec from either target.type:"pm2" or legacy `dev` field.
+    let command: string | undefined;
+    let cwd: string | undefined;
+    let label: string | undefined;
+
+    if (contract.target?.type === 'pm2') {
+      command = contract.target.command;
+      cwd = contract.target.cwd;
+      label = contract.target.label;
+    } else if (contract.dev) {
+      command = contract.dev.command;
+      cwd = contract.dev.cwd;
+      label = contract.dev.label;
+    }
+
+    // No explicit runtime declaration → not a PM2-managed contract.
+    // (Env-only contracts like datadog land here and are correctly skipped.)
+    if (!command) continue;
+
+    // Need a location for both env file path and default cwd.
     if (!contract.location) continue;
 
-    // dev is optional — defaults: command=pnpm dev, label=name, cwd=location
-    const command = contract.dev?.command || 'pnpm dev';
-    const cwd = contract.dev?.cwd || contract.location;
-    const label = contract.dev?.label || contract.name;
-    const absoluteCwd = cwd.startsWith('/') ? cwd : path.join(projectRoot, cwd);
+    const resolvedCwd = cwd || contract.location;
+    const resolvedLabel = label || contract.name;
+    const absoluteCwd = resolvedCwd.startsWith('/') ? resolvedCwd : path.join(projectRoot, resolvedCwd);
 
     const envFile = path.join(projectRoot, contract.location, `.env.${profile}`);
 
@@ -38,7 +59,7 @@ export function extractApps(
       command,
       cwd: absoluteCwd,
       envFile,
-      label,
+      label: resolvedLabel,
     });
   }
 

@@ -46,7 +46,9 @@ export function collectNginxEntries(
   const entries: NginxServiceEntry[] = [];
 
   for (const [, contract] of contracts) {
-    if (!contract.target?.subdomain) continue;
+    // Nginx routes are only meaningful for docker-compose targets
+    if (contract.target?.type !== 'docker-compose') continue;
+    if (!contract.target.subdomain) continue;
 
     const config = contract.target.config || {};
     const ports = config.ports as unknown[] | undefined;

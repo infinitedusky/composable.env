@@ -20,13 +20,26 @@ export interface ServiceDevConfig {
   label?: string;        // Pane display name (defaults to uppercase name)
 }
 
-export interface ContractTarget {
-  type: 'docker-compose';    // Future: other target types
+// Discriminated union of runtime target types. A contract has at most one
+// target today; v2 will allow targets: [...] arrays for the both-runtimes case.
+export type ContractTarget =
+  | DockerComposeTarget
+  | Pm2Target;
+
+export interface DockerComposeTarget {
+  type: 'docker-compose';
   file: string;              // Path to file (e.g., "docker-compose.yml")
   service: string;           // Service name within the file
   config?: Record<string, unknown>;  // Service config (image, ports, volumes, etc.)
   profileOverrides?: Record<string, Record<string, unknown>>;  // Per-profile config overrides (shallow merge per key)
-  subdomain?: string;  // Subdomain for reverse proxy (e.g., "portainer" → portainer.domain.com)
+  subdomain?: string;        // Subdomain for reverse proxy (e.g., "portainer" → portainer.domain.com)
+}
+
+export interface Pm2Target {
+  type: 'pm2';
+  command: string;           // Shell command to run (e.g., "pnpm dev")
+  cwd?: string;              // Working directory (defaults to contract.location)
+  label?: string;            // PM2 process display name (defaults to contract.name)
 }
 
 export interface ServiceContract {
@@ -138,14 +151,22 @@ export class ContractManager {
           );
         }
         if (contract.target) {
-          if (contract.target.type !== 'docker-compose') {
+          const t = contract.target;
+          if (t.type === 'docker-compose') {
+            if (!t.file || !t.service) {
+              throw new Error(
+                `Contract '${serviceName}' docker-compose target requires both 'file' and 'service' fields.`
+              );
+            }
+          } else if (t.type === 'pm2') {
+            if (!t.command) {
+              throw new Error(
+                `Contract '${serviceName}' pm2 target requires a 'command' field.`
+              );
+            }
+          } else {
             throw new Error(
-              `Contract '${serviceName}' has unsupported target type '${contract.target.type}'. Supported: docker-compose`
-            );
-          }
-          if (!contract.target.file || !contract.target.service) {
-            throw new Error(
-              `Contract '${serviceName}' target requires both 'file' and 'service' fields.`
+              `Contract '${serviceName}' has unsupported target type '${(t as { type: string }).type}'. Supported: docker-compose, pm2`
             );
           }
         }

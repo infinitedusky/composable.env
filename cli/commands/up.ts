@@ -77,7 +77,8 @@ export function registerUpCommand(program: Command): void {
         // This prevents vars like NODE_OPTIONS from one contract polluting another's build.
         for (const [serviceName, contract] of contracts) {
           if (serveServices !== 'all' && !serveServices.has(serviceName)) continue;
-          if (!contract.target) continue;
+          // serve mode only applies to docker-compose targets
+          if (contract.target?.type !== 'docker-compose') continue;
 
           // Derive build command: serve.build > turbo build --filter={command}
           const buildCmd = contract.serve?.build
