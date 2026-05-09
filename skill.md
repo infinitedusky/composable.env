@@ -237,7 +237,8 @@ secrets (.env.secrets.shared + .env.secrets.local)
   "defaults": {
     "LOG_LEVEL": "info"
   },
-  "dev": {
+  "target": {
+    "type": "pm2",
     "command": "pnpm dev",
     "label": "API Server"
   }
@@ -329,15 +330,18 @@ One contract defines the container, others add vars to it:
     "PORT": "${api.PORT}",
     "DATABASE_URL": "${database.URL}",
     "JWT_SECRET": "${auth.JWT_SECRET}"
-  },
-  "dev": { "command": "pnpm dev" }
+  }
 }
 ```
 
-Multiple contracts targeting the same service are **additive** — both `config` (arrays concatenated, objects merged) and `vars` (merged) accumulate. A contract can have `location`, `target`, or both:
-- `location` only → writes `.env.{profile}` (local dev)
-- `target` only → writes into docker-compose.yml (Docker only)
-- Both → writes to both (local dev + Docker from the same contract)
+Multiple contracts targeting the same compose service are **additive** — both `config` (arrays concatenated, objects merged) and `vars` (merged) accumulate. The relationship between `location` and `target` controls what gets generated:
+
+- `location` only, no `target` → writes `.env.{profile}`. No process runs. (Datadog-style env-only contracts.)
+- `target.type: "docker-compose"` only → writes into docker-compose.yml. No `.env` file.
+- `target.type: "docker-compose"` + `location` → writes both: `.env.{profile}` for local tooling AND the compose service.
+- `target.type: "pm2"` (requires `location`) → writes `.env.{profile}` and PM2 spawns the command from that directory.
+
+Today a contract has at most one `target`. To run the same contract via PM2 *and* Docker, add a legacy `dev` field as a sibling to the docker-compose target. v2 will introduce `targets: []` arrays for first-class multi-runtime support — see `docs/planning/targets-array-v2/`.
 
 ### Multi-profile compose output
 
