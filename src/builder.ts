@@ -555,6 +555,64 @@ export class EnvironmentBuilder {
         warnings.push(`Skipped ${skippedCount} contract(s) not matching profile '${currentProfile}'`);
       }
 
+      // Auto-inject a Caddy reverse-proxy contract when this profile has
+      // proxy: "caddy" (or "both") AND any contract declares a subdomain.
+      // The Caddy container mounts the Caddyfile that the proxy emitter
+      // generates downstream — closing the loop so "proxy: caddy" gives
+      // both the config file AND the container that serves it.
+      const ceConfigForCaddy = loadConfig(this.configDir);
+      const profileCfg = ceConfigForCaddy.profiles?.[currentProfile];
+      const wantsCaddy = profileCfg?.proxy === 'caddy' || profileCfg?.proxy === 'both';
+      // Find the compose file used by the contracts with subdomains, so the
+      // synthesized Caddy lands in the same file rather than a different one.
+      let subdomainComposeFile: string | undefined;
+      for (const c of availableContracts.values()) {
+        if (c.target?.type === 'docker-compose' && c.target.subdomain) {
+          subdomainComposeFile = c.target.file;
+          break;
+        }
+      }
+      if (wantsCaddy && subdomainComposeFile) {
+        const allProfileNames = profileSuffixes
+          ? Object.keys(profileSuffixes)
+          : [currentProfile];
+        // When multiple profiles emit caddy, the Caddyfile is suffixed
+        // (Caddyfile.local, Caddyfile.staging). Single emitting profile
+        // gets the unsuffixed Caddyfile. Mirror that filename here.
+        const emittingCaddyProfiles = allProfileNames.filter(p => {
+          const cfg = ceConfigForCaddy.profiles?.[p];
+          return (cfg?.proxy === 'caddy' || cfg?.proxy === 'both') && cfg?.domain;
+        });
+        const caddyfileName = emittingCaddyProfiles.length === 1
+          ? 'Caddyfile'
+          : `Caddyfile.${currentProfile}`;
+
+        const synthCaddyContract: import('./contracts.js').ServiceContract = {
+          name: 'caddy',
+          target: {
+            type: 'docker-compose',
+            file: subdomainComposeFile,
+            service: 'caddy',
+            config: {
+              image: 'caddy:2-alpine',
+              ports: ['80:80', '443:443'],
+              volumes: [
+                `./${caddyfileName}:/etc/caddy/Caddyfile:ro`,
+                'caddy_data:/data',
+                'caddy_config:/config',
+              ],
+              restart: 'unless-stopped',
+            },
+          },
+          vars: {},
+        };
+        // Don't overwrite a user-authored caddy contract — they may have
+        // customized it with a different image, extra volumes, etc.
+        if (!availableContracts.has('caddy')) {
+          availableContracts.set('caddy', synthCaddyContract);
+        }
+      }
+
       const useNewFormat = this.contracts.hasNewFormatContracts();
 
       let componentPool: Map<string, Record<string, string>> | undefined;

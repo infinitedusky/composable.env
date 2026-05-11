@@ -507,6 +507,8 @@ Contracts with `subdomain` on their target auto-generate a reverse-proxy config 
 
 **Caddy** (`proxy: "caddy"`): generates `Caddyfile.{profile}` (or `Caddyfile`) with `reverse_proxy {service}{suffix}:{port}` site blocks. Caddy auto-issues HTTPS via its internal CA (run `caddy trust` once per dev machine) and re-resolves Docker DNS per request — handy for local dev when you want to bypass OrbStack's stale-IP cache by running Caddy as a docker-compose service joined to the same network. Auto-gitignored. For DNS resolution without `/etc/hosts` edits, run `./scripts/dev/setup-dns.sh` (scaffolded by `ce init --scaffold docker`) — it configures dnsmasq + `/etc/resolver/{tld}` once per machine so any `*.{your-domain}` hostname resolves to 127.0.0.1.
 
+When `proxy: "caddy"` is set AND any contract has `target.subdomain`, ce **auto-injects a Caddy container** (`caddy:2-alpine`) into the same `docker-compose.yml`. It mounts the generated Caddyfile, publishes :80 and :443 on the host, and persists Caddy's internal CA in named volumes. No manual `caddy.contract.json` needed. If you write your own `caddy.contract.json` (e.g., for a custom image or extra mounts), your contract wins — ce skips the injection.
+
 **both** emits both files. Use during a transition from one to the other, or when local dev uses Caddy but production uses nginx.
 
 ## Component format

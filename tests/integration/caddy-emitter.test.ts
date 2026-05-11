@@ -229,6 +229,122 @@ describe('Caddy emitter (integration)', () => {
     expect(content).toContain('reverse_proxy poker-local:3666');
   });
 
+  it('auto-injects a caddy container into docker-compose when proxy:caddy + subdomain', async () => {
+    const composeFile = path.join(tmpDir, 'docker-compose.yml');
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'caddy' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: composeFile,
+        service: 'admin',
+        subdomain: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    const compose = fs.readFileSync(composeFile, 'utf8');
+    // The synthesized caddy service should appear in compose, with the
+    // expected image, ports, and Caddyfile mount.
+    expect(compose).toContain('caddy:2-alpine');
+    expect(compose).toContain('80:80');
+    expect(compose).toContain('443:443');
+    expect(compose).toMatch(/\.\/Caddyfile:\/etc\/caddy\/Caddyfile/);
+    // Profile-suffixed service name (caddy-local)
+    expect(compose).toContain('caddy-local');
+  });
+
+  it('does NOT inject caddy when no contract has subdomain', async () => {
+    const composeFile = path.join(tmpDir, 'docker-compose.yml');
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'caddy' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'redis', { default: {} });
+    writeContract(tmpDir, 'redis', {
+      name: 'redis',
+      target: {
+        type: 'docker-compose',
+        file: composeFile,
+        service: 'redis',
+        config: { ports: ['6379:6379'] },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    const compose = fs.readFileSync(composeFile, 'utf8');
+    expect(compose).not.toContain('caddy:2-alpine');
+  });
+
+  it('does NOT overwrite a user-authored caddy contract', async () => {
+    const composeFile = path.join(tmpDir, 'docker-compose.yml');
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'caddy' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: composeFile,
+        service: 'admin',
+        subdomain: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+    // User-authored caddy contract with a custom image
+    writeContract(tmpDir, 'caddy', {
+      name: 'caddy',
+      target: {
+        type: 'docker-compose',
+        file: composeFile,
+        service: 'caddy',
+        config: {
+          image: 'caddy:2.7-alpine', // Custom version
+          ports: ['8080:80', '8443:443'], // Custom host ports
+          volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro'],
+        },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    const compose = fs.readFileSync(composeFile, 'utf8');
+    // Synthesized version would have caddy:2-alpine and 80:80, but the
+    // user-authored contract takes precedence.
+    expect(compose).toContain('caddy:2.7-alpine');
+    expect(compose).toContain('8080:80');
+    expect(compose).toContain('8443:443');
+    expect(compose).not.toContain('caddy:2-alpine');
+  });
+
   it('auto-gitignores the generated Caddyfile', async () => {
     writeCeConfig(tmpDir, {
       envDir: 'env',
