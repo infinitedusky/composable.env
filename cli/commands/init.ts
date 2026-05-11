@@ -146,6 +146,9 @@ export function registerInitCommand(program: Command): void {
         console.log(`  2. Add secrets to ${envDir}/.env.secrets.shared`);
         console.log('  3. Run: pnpm ce env:build');
         console.log('  4. Run: pnpm ce dc:up local');
+        console.log('');
+        console.log(chalk.gray('  Optional (one-time per machine, macOS):'));
+        console.log(chalk.gray('    ./scripts/dev/setup-dns.sh   # *.<your-domain> resolves to 127.0.0.1 without /etc/hosts'));
       } else if (options.scaffold === 'vitepress') {
         console.log('  1. Run: pnpm install');
         console.log('  2. Run: pnpm --filter @project/docs dev');
@@ -324,6 +327,116 @@ function scaffoldDocker(cwd: string, envDir: string, syncOnly: boolean = false):
     );
     fs.chmodSync(entrypointPath, 0o755);
     console.log(chalk.green('  created docker/app-entrypoint.sh'));
+  }
+
+  // scripts/dev/setup-dns.sh — one-time host DNS setup (macOS).
+  // Reads ce.json profile domains and configures dnsmasq + /etc/resolver
+  // so *.{tld} resolves to 127.0.0.1 without /etc/hosts edits.
+  // Idempotent — safe to re-run any time ce.json domains change.
+  const scriptsDevDir = path.join(cwd, 'scripts', 'dev');
+  if (!fs.existsSync(scriptsDevDir)) {
+    fs.mkdirSync(scriptsDevDir, { recursive: true });
+    console.log(chalk.green('  created scripts/dev/'));
+  }
+  const setupDnsPath = path.join(scriptsDevDir, 'setup-dns.sh');
+  if (!fs.existsSync(setupDnsPath)) {
+    fs.writeFileSync(setupDnsPath,
+      '#!/bin/bash\n' +
+      '# One-time host DNS setup for composable.env projects (macOS).\n' +
+      '#\n' +
+      '# Reads ce.json profile domains and configures dnsmasq + /etc/resolver/\n' +
+      '# so *.{tld} resolves to 127.0.0.1 with no /etc/hosts edits.\n' +
+      '# Skips OrbStack-managed .orb.local domains (OrbStack owns those).\n' +
+      '#\n' +
+      '# Idempotent — re-run anytime ce.json profile domains change.\n' +
+      '# Requires: macOS, Homebrew, sudo for /etc/resolver writes.\n' +
+      '\n' +
+      'set -euo pipefail\n' +
+      '\n' +
+      'if [[ "$OSTYPE" != "darwin"* ]]; then\n' +
+      '  echo "setup-dns.sh is macOS-only (uses /etc/resolver). For Linux, edit /etc/resolv.conf or use systemd-resolved."\n' +
+      '  exit 1\n' +
+      'fi\n' +
+      '\n' +
+      'if [ ! -f ce.json ]; then\n' +
+      '  echo "ce.json not found. Run this from the project root."\n' +
+      '  exit 1\n' +
+      'fi\n' +
+      '\n' +
+      '# Extract unique TLDs from ce.json profiles[].domain (everything after the\n' +
+      '# first dot). Skip *.orb.local — OrbStack handles those.\n' +
+      'TLDS=$(node -e \'\n' +
+      'const cfg = require("./ce.json");\n' +
+      'const tlds = new Set();\n' +
+      'for (const p of Object.values(cfg.profiles || {})) {\n' +
+      '  if (!p.domain) continue;\n' +
+      '  if (p.domain.endsWith(".orb.local")) continue;\n' +
+      '  const parts = p.domain.split(".");\n' +
+      '  if (parts.length < 2) continue;\n' +
+      '  tlds.add(parts.slice(1).join("."));\n' +
+      '}\n' +
+      'console.log([...tlds].join("\\n"));\n' +
+      '\')\n' +
+      '\n' +
+      'if [ -z "$TLDS" ]; then\n' +
+      '  echo "No domains in ce.json profiles need local DNS (or all use .orb.local)."\n' +
+      '  echo "Add a profile with a custom domain (e.g., \\"domain\\": \\"myapp.local\\") first."\n' +
+      '  exit 0\n' +
+      'fi\n' +
+      '\n' +
+      'echo "Setting up local DNS for TLDs: $(echo $TLDS | tr \'\\n\' \' \')"\n' +
+      '\n' +
+      'if ! command -v brew >/dev/null 2>&1; then\n' +
+      '  echo "Homebrew is required. Install from https://brew.sh"\n' +
+      '  exit 1\n' +
+      'fi\n' +
+      '\n' +
+      'if ! command -v dnsmasq >/dev/null 2>&1; then\n' +
+      '  echo "Installing dnsmasq..."\n' +
+      '  brew install dnsmasq\n' +
+      'fi\n' +
+      '\n' +
+      'DNSMASQ_CONF="$(brew --prefix)/etc/dnsmasq.conf"\n' +
+      'if [ ! -f "$DNSMASQ_CONF" ]; then\n' +
+      '  mkdir -p "$(dirname "$DNSMASQ_CONF")"\n' +
+      '  touch "$DNSMASQ_CONF"\n' +
+      'fi\n' +
+      '\n' +
+      'while IFS= read -r tld; do\n' +
+      '  [ -z "$tld" ] && continue\n' +
+      '  ADDR_LINE="address=/$tld/127.0.0.1"\n' +
+      '  if grep -qxF "$ADDR_LINE" "$DNSMASQ_CONF" 2>/dev/null; then\n' +
+      '    echo "  dnsmasq.conf: $tld already configured"\n' +
+      '  else\n' +
+      '    echo "$ADDR_LINE" >> "$DNSMASQ_CONF"\n' +
+      '    echo "  dnsmasq.conf: added $tld -> 127.0.0.1"\n' +
+      '  fi\n' +
+      'done <<< "$TLDS"\n' +
+      '\n' +
+      'echo "Restarting dnsmasq (sudo required)..."\n' +
+      'sudo brew services restart dnsmasq >/dev/null\n' +
+      '\n' +
+      'sudo mkdir -p /etc/resolver\n' +
+      'while IFS= read -r tld; do\n' +
+      '  [ -z "$tld" ] && continue\n' +
+      '  RESOLVER_FILE="/etc/resolver/$tld"\n' +
+      '  EXPECTED="nameserver 127.0.0.1"\n' +
+      '  if [ -f "$RESOLVER_FILE" ] && grep -qxF "$EXPECTED" "$RESOLVER_FILE"; then\n' +
+      '    echo "  /etc/resolver/$tld already configured"\n' +
+      '  else\n' +
+      '    echo "$EXPECTED" | sudo tee "$RESOLVER_FILE" >/dev/null\n' +
+      '    echo "  /etc/resolver/$tld written"\n' +
+      '  fi\n' +
+      'done <<< "$TLDS"\n' +
+      '\n' +
+      'sudo dscacheutil -flushcache 2>/dev/null || true\n' +
+      'sudo killall -HUP mDNSResponder 2>/dev/null || true\n' +
+      '\n' +
+      'echo ""\n' +
+      'echo "Done. Verify a TLD resolves with: ping -c1 anything.$(echo \"$TLDS\" | head -n1)"\n'
+    );
+    fs.chmodSync(setupDnsPath, 0o755);
+    console.log(chalk.green('  created scripts/dev/setup-dns.sh'));
   }
 
   // Dockerfile for Next.js local dev (hot reload via volume mounts)
