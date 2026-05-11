@@ -192,6 +192,43 @@ describe('Caddy emitter (integration)', () => {
     expect(fs.existsSync(path.join(tmpDir, 'Caddyfile'))).toBe(false);
   });
 
+  it('resolves variable refs in target.config.ports before parsing', async () => {
+    // Regression: contracts using "${component.PORT}:${component.PORT}"
+    // for the port field were silently dropped from the proxy config.
+    // The builder must resolve the ports before passing to the emitter.
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'caddy' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'poker', { default: { PORT: '3666' } });
+    writeContract(tmpDir, 'poker', {
+      name: 'poker',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'poker',
+        subdomain: 'poker',
+        config: { ports: ['${poker.PORT}:${poker.PORT}'] },
+      },
+      vars: { PORT: '${poker.PORT}' },
+    });
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    const caddyPath = path.join(tmpDir, 'Caddyfile');
+    expect(fs.existsSync(caddyPath)).toBe(true);
+    const content = fs.readFileSync(caddyPath, 'utf8');
+    // The ${poker.PORT} reference should have resolved to 3666 before
+    // the emitter parsed the ports field.
+    expect(content).toContain('poker.numero.local {');
+    expect(content).toContain('reverse_proxy poker-local:3666');
+  });
+
   it('auto-gitignores the generated Caddyfile', async () => {
     writeCeConfig(tmpDir, {
       envDir: 'env',

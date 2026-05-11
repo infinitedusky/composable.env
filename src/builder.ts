@@ -821,10 +821,30 @@ export class EnvironmentBuilder {
           if (proxy === 'caddy' || proxy === 'both') caddyProfiles.push(name);
         }
 
+        // Pre-resolve target.config for each contract so emitters see real
+        // values instead of "${service.PORT}" literals. Without this, ports
+        // like "${poker.PORT}:${poker.PORT}" can't be parsed and the
+        // emitter silently drops those contracts from the proxy config.
+        const resolvedContractsForProxy = new Map(
+          [...availableContracts].map(([name, contract]) => {
+            if (contract.target?.type !== 'docker-compose' || !contract.target.config) {
+              return [name, contract];
+            }
+            const resolvedConfig = this.resolveConfigValues(
+              contract.target.config,
+              resolvedPool,
+            );
+            return [
+              name,
+              { ...contract, target: { ...contract.target, config: resolvedConfig } },
+            ];
+          })
+        );
+
         if (nginxProfiles.length > 0) {
           const nginxResults = writeNginxConfigs(
             this.configDir,
-            availableContracts,
+            resolvedContractsForProxy,
             nginxProfiles,
             profileSuffixes || {},
             profileDomains,
@@ -841,7 +861,7 @@ export class EnvironmentBuilder {
         if (caddyProfiles.length > 0) {
           const caddyResults = writeCaddyfiles(
             this.configDir,
-            availableContracts,
+            resolvedContractsForProxy,
             caddyProfiles,
             profileSuffixes || {},
             profileDomains,

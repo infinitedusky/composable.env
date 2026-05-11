@@ -39,17 +39,42 @@ export function collectProxyEntries(
 ): ProxyEntry[] {
   const entries: ProxyEntry[] = [];
 
-  for (const [, contract] of contracts) {
+  for (const [name, contract] of contracts) {
     if (contract.target?.type !== 'docker-compose') continue;
     if (!contract.target.subdomain) continue;
 
     const config = contract.target.config || {};
     const ports = config.ports as unknown[] | undefined;
 
-    if (!ports || ports.length === 0) continue;
+    if (!ports || ports.length === 0) {
+      console.warn(
+        `⚠️  Contract '${name}' has target.subdomain '${contract.target.subdomain}' ` +
+        `but no ports defined — skipping in proxy config.`
+      );
+      continue;
+    }
+
+    // Detect unresolved variable refs in the ports field — common when a
+    // contract uses "${service.PORT}:${service.PORT}" but the builder didn't
+    // resolve values before passing the contract here. Warn loudly so the
+    // missing route is visible rather than silently dropped.
+    const hasUnresolvedRefs = ports.some(p => /\$\{[^}]+\}/.test(String(p)));
+    if (hasUnresolvedRefs) {
+      console.warn(
+        `⚠️  Contract '${name}' ports contain unresolved variable references: ` +
+        `${ports.map(p => `"${p}"`).join(', ')}. Skipping in proxy config.`
+      );
+      continue;
+    }
 
     const port = extractPort(ports);
-    if (!port) continue;
+    if (!port) {
+      console.warn(
+        `⚠️  Contract '${name}' has no parseable port in ${JSON.stringify(ports)} — ` +
+        `skipping in proxy config.`
+      );
+      continue;
+    }
 
     const serviceName = `${contract.target.service}${profileSuffix}`;
 
