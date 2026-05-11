@@ -95,6 +95,10 @@ export const CeProfileConfigSchema = z.object({
   suffix: z.string(),
   domain: z.string().optional(),
   tls: z.boolean().optional(),
+  // Reverse proxy config file format. "nginx" (default) writes nginx.conf,
+  // "caddy" writes Caddyfile, "both" emits both. Defaults to nginx when
+  // omitted to preserve existing behavior.
+  proxy: z.enum(['nginx', 'caddy', 'both']).optional(),
   override: z.record(z.string(), CeServiceOverrideSchema).optional(),
 }).strict();
 

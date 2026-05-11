@@ -18,6 +18,7 @@ import {
   type ComposeMultiProfileEntry,
 } from './targets/docker-compose.js';
 import { writeNginxConfigs } from './targets/nginx.js';
+import { writeCaddyfiles } from './targets/caddyfile.js';
 import { loadConfig } from './config.js';
 
 /**
@@ -805,17 +806,26 @@ export class EnvironmentBuilder {
         generatedFiles.push(filePath);
       }
 
-      // Generate nginx configs for profiles with domains and contracts with subdomains
+      // Generate reverse-proxy configs (nginx/caddy) for profiles with
+      // domains and contracts with subdomains. Each profile picks its
+      // emitter via ce.json profiles[p].proxy (defaults to "nginx").
       if (profileConfigs) {
         const profileDomains: Record<string, string> = {};
+        const nginxProfiles: string[] = [];
+        const caddyProfiles: string[] = [];
         for (const [name, config] of Object.entries(profileConfigs)) {
-          if (config.domain) profileDomains[name] = config.domain;
+          if (!config.domain) continue;
+          profileDomains[name] = config.domain;
+          const proxy = config.proxy ?? 'nginx';
+          if (proxy === 'nginx' || proxy === 'both') nginxProfiles.push(name);
+          if (proxy === 'caddy' || proxy === 'both') caddyProfiles.push(name);
         }
-        if (Object.keys(profileDomains).length > 0) {
+
+        if (nginxProfiles.length > 0) {
           const nginxResults = writeNginxConfigs(
             this.configDir,
             availableContracts,
-            profileNames,
+            nginxProfiles,
             profileSuffixes || {},
             profileDomains,
           );
@@ -823,6 +833,23 @@ export class EnvironmentBuilder {
             generatedFiles.push(result.filePath);
             if (result.warnings.length > 0) {
               warnings.push(`Nginx routes (${path.basename(result.filePath)}):`);
+              warnings.push(...result.warnings);
+            }
+          }
+        }
+
+        if (caddyProfiles.length > 0) {
+          const caddyResults = writeCaddyfiles(
+            this.configDir,
+            availableContracts,
+            caddyProfiles,
+            profileSuffixes || {},
+            profileDomains,
+          );
+          for (const result of caddyResults) {
+            generatedFiles.push(result.filePath);
+            if (result.warnings.length > 0) {
+              warnings.push(`Caddy routes (${path.basename(result.filePath)}):`);
               warnings.push(...result.warnings);
             }
           }

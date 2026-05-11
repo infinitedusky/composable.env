@@ -182,7 +182,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
 | `pnpm ce env:build:all` | `pnpm ce build:all` | Build .env files for all profiles. |
 | `pnpm ce profile:list` | `pnpm ce p:list` | Show components, profiles, contracts |
 | `pnpm ce pm2:start [profile]` | `pnpm ce start` | Build env + launch PM2 for contracts with `target.type: "pm2"` (or legacy `dev` field) |
-| `pnpm ce dc:up [profile]` | `pnpm ce up` | `docker compose --profile X down && up -d --build --remove-orphans`, then prune dangling images and build cache older than 24h. Flags: `--no-cache` (force full rebuild), `--serve [services...]` (host-side build then run serve config). Does NOT auto-run env:build — run that separately if you changed env files. |
+| `pnpm ce dc:up [profile]` | `pnpm ce up` | `docker compose --profile X down && up -d --build --remove-orphans`, then prune dangling images and build cache older than 24h. Before bringing services up, runs a pre-flight check for host port conflicts against other running compose projects — if another project is already publishing one of this project's host ports (commonly :80/:443 when running two proxy-equipped stacks), prints the conflicting container/project and exits with instructions to stop the other project first. Flags: `--no-cache` (force full rebuild), `--serve [services...]` (host-side build then run serve config). Does NOT auto-run env:build — run that separately if you changed env files. |
 | `pnpm ce dc:down [profile]` | `pnpm ce down` | Stop Docker Compose services for a profile (`-v` to also remove volumes) |
 | `pnpm ce dc:logs [profile]` | `pnpm ce logs` | Tail Docker Compose logs (`--service X` for one service) |
 | `pnpm ce dc:ps [profile]` | `pnpm ce ps` | Show Docker Compose service status |
@@ -225,6 +225,7 @@ secrets (.env.secrets.shared + .env.secrets.local)
   - `suffix` — compose service name suffix (e.g. `"-local"`, `""`, `"-stg"`)
   - `domain` — used for auto-generated `${service.*.address}`. If it ends in `.orb.local`, the first segment becomes the docker-compose project name (so OrbStack DNS matches what ce resolves).
   - `tls` — auto-generate mkcert certs, inject into all containers, run Caddy on :443/:80 (local dev only).
+  - `proxy` — reverse-proxy config file format: `"nginx"` (default), `"caddy"`, or `"both"`. Controls what gets emitted alongside `docker-compose.yml` from contracts with `target.subdomain`. Caddy is useful for local dev when you want a single in-network reverse proxy that re-resolves Docker DNS per request (avoids OrbStack's stale-IP cache after container restarts). nginx is what most production environments use. `"both"` emits both side by side.
   - `override` — per-service suffix/domain overrides (e.g. `"admin": { "suffix": "" }` keeps admin unsuffixed in this profile).
 - Profile resolution: `--profile` flag > `CE_PROFILE` env var (legacy: `CENV_PROFILE`) > `ce.json defaultProfile` > `"default"`
 
@@ -486,9 +487,9 @@ Key points:
 - Contracts with only `target` (no `location`) are skipped by `pnpm ce pm2:start`
 - See `examples/docker-compose/` for a full working example
 
-## Reverse proxy — nginx config generation
+## Reverse proxy — nginx or Caddy config generation
 
-Contracts with `subdomain` on their target auto-generate nginx configs per profile. Requires `domain` in `ce.json` profiles.
+Contracts with `subdomain` on their target auto-generate a reverse-proxy config per profile. Requires `domain` in `ce.json` profiles. The emitter is selected via the profile's `proxy` field — `"nginx"` (default), `"caddy"`, or `"both"`.
 
 ```json
 {
@@ -502,7 +503,11 @@ Contracts with `subdomain` on their target auto-generate nginx configs per profi
 }
 ```
 
-`pnpm ce env:build` generates `nginx.{profile}.conf` with `server_name portainer.{domain}` proxying to the container port. Includes WebSocket upgrade headers. Auto-gitignored. Deploy by copying to `/etc/nginx/sites-enabled/`.
+**nginx** (`proxy: "nginx"`, default): generates `nginx.{profile}.conf` (or `nginx.conf` if only one profile emits) with `server_name portainer.{domain}` proxying to the container port. Includes WebSocket upgrade headers. Auto-gitignored. Typical deployment: copy to `/etc/nginx/sites-enabled/` on the production host.
+
+**Caddy** (`proxy: "caddy"`): generates `Caddyfile.{profile}` (or `Caddyfile`) with `reverse_proxy {service}{suffix}:{port}` site blocks. Caddy auto-issues HTTPS via its internal CA (run `caddy trust` once per dev machine) and re-resolves Docker DNS per request — handy for local dev when you want to bypass OrbStack's stale-IP cache by running Caddy as a docker-compose service joined to the same network. Auto-gitignored.
+
+**both** emits both files. Use during a transition from one to the other, or when local dev uses Caddy but production uses nginx.
 
 ## Component format
 

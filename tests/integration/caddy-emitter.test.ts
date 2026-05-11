@@ -1,0 +1,226 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  createTempEnvDir,
+  writeComponent,
+  writeProfile,
+  writeContract,
+  writeCeConfig,
+  cleanupTempDir,
+} from '../fixtures/helpers.js';
+import { EnvironmentBuilder } from '../../src/builder.js';
+
+describe('Caddy emitter (integration)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = createTempEnvDir();
+  });
+
+  afterEach(() => {
+    cleanupTempDir(tmpDir);
+  });
+
+  async function buildAll(profileSuffixes?: Record<string, string>) {
+    const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'ce.json'), 'utf8'));
+    const builder = new EnvironmentBuilder(tmpDir, '', undefined);
+    await builder.initialize();
+    return builder.buildAllProfiles(undefined, profileSuffixes, config.profiles);
+  }
+
+  it('emits Caddyfile when profile.proxy = "caddy"', async () => {
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'caddy' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'admin',
+        subdomain: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    const caddyPath = path.join(tmpDir, 'Caddyfile');
+    expect(fs.existsSync(caddyPath)).toBe(true);
+
+    const content = fs.readFileSync(caddyPath, 'utf8');
+    expect(content).toContain('admin.numero.local {');
+    expect(content).toContain('reverse_proxy admin-local:3664');
+    expect(content).toContain('# Profile: local');
+
+    // No nginx.conf should exist when proxy is caddy only
+    expect(fs.existsSync(path.join(tmpDir, 'nginx.conf'))).toBe(false);
+  });
+
+  it('emits nginx by default (proxy field omitted)', async () => {
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'admin',
+        subdomain: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    expect(fs.existsSync(path.join(tmpDir, 'nginx.conf'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, 'Caddyfile'))).toBe(false);
+  });
+
+  it('emits both when proxy = "both"', async () => {
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'both' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'admin',
+        subdomain: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    expect(fs.existsSync(path.join(tmpDir, 'nginx.conf'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, 'Caddyfile'))).toBe(true);
+  });
+
+  it('uses suffixed filenames when multiple profiles emit caddy', async () => {
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'caddy' },
+        staging: { suffix: '-stg', domain: 'staging.numero.com', proxy: 'caddy' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeProfile(tmpDir, 'staging', { name: 'staging', description: 'Staging' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'admin',
+        subdomain: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ local: '-local', staging: '-stg' });
+    expect(result.success).toBe(true);
+
+    expect(fs.existsSync(path.join(tmpDir, 'Caddyfile.local'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, 'Caddyfile.staging'))).toBe(true);
+
+    const local = fs.readFileSync(path.join(tmpDir, 'Caddyfile.local'), 'utf8');
+    expect(local).toContain('admin.numero.local {');
+    expect(local).toContain('reverse_proxy admin-local:3664');
+
+    const staging = fs.readFileSync(path.join(tmpDir, 'Caddyfile.staging'), 'utf8');
+    expect(staging).toContain('admin.staging.numero.com {');
+    expect(staging).toContain('reverse_proxy admin-stg:3664');
+  });
+
+  it('skips contracts without subdomain', async () => {
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'caddy' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'redis', { default: {} });
+    writeContract(tmpDir, 'redis', {
+      name: 'redis',
+      // No subdomain — internal service, not browser-facing
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'redis',
+        config: { ports: ['6379:6379'] },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    // No Caddyfile written when nothing has a subdomain
+    expect(fs.existsSync(path.join(tmpDir, 'Caddyfile'))).toBe(false);
+  });
+
+  it('auto-gitignores the generated Caddyfile', async () => {
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'caddy' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'admin',
+        subdomain: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+
+    // Seed .gitignore so the file exists for append
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules\n');
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    const gi = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(gi).toContain('Caddyfile');
+  });
+});

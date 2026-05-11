@@ -3,9 +3,105 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { Command } from 'commander';
 import chalk from 'chalk';
+import * as yaml from 'yaml';
 import { loadConfig, ContractManager } from '../../src/index.js';
 import type { CeConfig } from '../../src/index.js';
 import { EnvironmentBuilder } from '../../src/index.js';
+
+/**
+ * Extract host-side ports from a generated docker-compose.yml.
+ * Looks at services.*.ports for entries like "443:443" or "127.0.0.1:443:443"
+ * and returns the host-side port numbers. Skips entries without an explicit
+ * host port (e.g., "3000" alone means container-only).
+ */
+function extractHostPortsFromCompose(composeFilePath: string): number[] {
+  if (!fs.existsSync(composeFilePath)) return [];
+  const raw = fs.readFileSync(composeFilePath, 'utf8');
+  const doc = yaml.parse(raw) as { services?: Record<string, { ports?: unknown[] }> } | null;
+  if (!doc?.services) return [];
+
+  const hostPorts = new Set<number>();
+  for (const service of Object.values(doc.services)) {
+    if (!service.ports) continue;
+    for (const entry of service.ports) {
+      const str = String(entry);
+      const clean = str.replace(/\/(tcp|udp)$/, '');
+      const parts = clean.split(':');
+      // Need at least HOST:CONTAINER to be host-published.
+      // Forms: "HOST:CONTAINER", "127.0.0.1:HOST:CONTAINER"
+      if (parts.length < 2) continue;
+      const hostStr = parts.length === 2 ? parts[0] : parts[1];
+      const host = parseInt(hostStr, 10);
+      if (!isNaN(host)) hostPorts.add(host);
+    }
+  }
+  return [...hostPorts];
+}
+
+/**
+ * Query Docker for any running container that publishes one of `hostPorts`
+ * and belongs to a *different* compose project than `ourProject`. Returns
+ * a list of conflicts so we can print a helpful error before docker compose
+ * fails with "bind: address already in use".
+ */
+function findRunningPortConflicts(
+  hostPorts: number[],
+  ourProject: string,
+): Array<{ name: string; project: string; ports: number[] }> {
+  if (hostPorts.length === 0) return [];
+
+  let psOutput: string;
+  try {
+    psOutput = execSync(
+      'docker ps --format \'{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}\'',
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+  } catch {
+    return []; // docker not available — don't block dc:up
+  }
+
+  const conflicts: Array<{ name: string; project: string; ports: number[] }> = [];
+  const portSet = new Set(hostPorts);
+
+  for (const line of psOutput.split('\n')) {
+    if (!line.trim()) continue;
+    const [name, project, portsStr] = line.split('|');
+    if (!project || project === ourProject) continue;
+
+    const matched: number[] = [];
+    // "Ports" column looks like: "0.0.0.0:443->443/tcp, :::443->443/tcp, 0.0.0.0:80->80/tcp"
+    // Extract each host port (the number after the last colon and before "->")
+    const matches = portsStr.matchAll(/:(\d+)->/g);
+    for (const m of matches) {
+      const p = parseInt(m[1], 10);
+      if (!isNaN(p) && portSet.has(p)) matched.push(p);
+    }
+    if (matched.length > 0) {
+      conflicts.push({ name, project, ports: [...new Set(matched)] });
+    }
+  }
+
+  return conflicts;
+}
+
+/**
+ * Determine this project's compose project name. Mirrors the builder logic:
+ *   - If any profile has a `.orb.local` domain, use the first segment
+ *     (so OrbStack DNS matches)
+ *   - Otherwise docker-compose falls back to the directory name, lowercased
+ *     and stripped of dashes/underscores.
+ */
+function deriveComposeProjectName(cwd: string, config: CeConfig): string {
+  if (config.profiles) {
+    for (const cfg of Object.values(config.profiles)) {
+      if (cfg.domain?.endsWith('.orb.local')) {
+        return cfg.domain.split('.')[0];
+      }
+    }
+  }
+  // Docker's default: directory basename, lowercased, non-alphanum stripped
+  return path.basename(cwd).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
 
 function resolveProfile(
   explicit: string | undefined,
@@ -191,7 +287,32 @@ export function registerUpCommand(program: Command): void {
         process.exit(1);
       }
 
-      // 2. Down existing services for this profile
+      // 2. Pre-flight: check for host port conflicts with OTHER running compose
+      //    projects. Catches the "two projects both want :80/:443" case early
+      //    with a helpful error instead of letting docker-compose fail with
+      //    "bind: address already in use".
+      const ourProject = deriveComposeProjectName(cwd, config);
+      const hostPorts = extractHostPortsFromCompose(path.join(cwd, composeFile));
+      const conflicts = findRunningPortConflicts(hostPorts, ourProject);
+      if (conflicts.length > 0) {
+        console.error(chalk.red('Host port conflict — another Docker project is already using these ports:'));
+        for (const c of conflicts) {
+          console.error(chalk.red(`  ${c.name} (project: ${c.project}) — port${c.ports.length > 1 ? 's' : ''} ${c.ports.join(', ')}`));
+        }
+        console.error('');
+        console.error(chalk.gray(`Stop the other project first:`));
+        for (const c of conflicts) {
+          console.error(chalk.gray(`  docker compose -p ${c.project} down`));
+        }
+        console.error('');
+        console.error(chalk.gray(`Or shut down individual containers:`));
+        for (const c of conflicts) {
+          console.error(chalk.gray(`  docker stop ${c.name}`));
+        }
+        process.exit(1);
+      }
+
+      // 3. Down existing services for this profile
       console.log(chalk.blue(`Stopping existing ${profile} services...`));
       try {
         execSync(
