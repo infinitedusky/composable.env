@@ -490,6 +490,22 @@ export class EnvironmentBuilder {
    * Generate service.* pseudo-variables for all target contracts.
    * For each service: host, address, suffix, domain, protocol.
    * Keys are dotted: "game-server.host", "game-server.address", etc.
+   *
+   * Proxy-aware behavior: when the profile has `proxy: "caddy"` (or "both")
+   * AND a contract has `target.subdomain`, the public address resolves to
+   * the proxy vhost ({subdomain}.{domain}) over https. This is the URL the
+   * browser uses to reach the service through the reverse proxy.
+   *
+   *   - host:     always the Docker DNS name ({service}{suffix}). Internal
+   *               container-to-container calls keep using this — they don't
+   *               go through the proxy.
+   *   - address:  proxy vhost when proxied, else {host}.{domain} (Docker DNS).
+   *               This is what NEXT_PUBLIC_* and other browser-facing env
+   *               vars should reference.
+   *   - protocol: "https" when proxied or when profile.tls is true, else "http".
+   *
+   * Contracts without a subdomain are not proxy-routable; their address and
+   * protocol stay on the Docker DNS form regardless of profile.proxy.
    */
   private generateServiceVars(
     contracts: Map<string, import('./contracts.js').ServiceContract>,
@@ -500,6 +516,7 @@ export class EnvironmentBuilder {
     const defaultSuffix = profileConfig.suffix;
     const defaultDomain = profileConfig.domain || '';
     const defaultProtocol = profileConfig.tls ? 'https' : 'http';
+    const profileHasProxy = profileConfig.proxy === 'caddy' || profileConfig.proxy === 'both';
 
     // Default entries — profile-level suffix and domain without a specific service
     vars['default.suffix'] = defaultSuffix;
@@ -509,6 +526,7 @@ export class EnvironmentBuilder {
     for (const [, contract] of contracts) {
       if (contract.target?.type !== 'docker-compose') continue;
       const svcName = contract.target.service;
+      const subdomain = contract.target.subdomain;
 
       // Per-service overrides from ce.json
       const svcOverride = profileConfig.override?.[svcName];
@@ -516,13 +534,19 @@ export class EnvironmentBuilder {
       const domain = svcOverride?.domain ?? defaultDomain;
 
       const host = `${svcName}${suffix}`;
-      const address = domain ? `${host}.${domain}` : host;
+      const dockerDnsAddress = domain ? `${host}.${domain}` : host;
+
+      // Proxy-aware: subdomain + proxy → public vhost over https.
+      // Otherwise the address stays on the Docker DNS form.
+      const isProxied = profileHasProxy && subdomain;
+      const address = isProxied && domain ? `${subdomain}.${domain}` : dockerDnsAddress;
+      const protocol = isProxied ? 'https' : defaultProtocol;
 
       vars[`${svcName}.host`] = host;
       vars[`${svcName}.address`] = address;
       vars[`${svcName}.suffix`] = suffix;
       vars[`${svcName}.domain`] = domain;
-      vars[`${svcName}.protocol`] = defaultProtocol;
+      vars[`${svcName}.protocol`] = protocol;
     }
 
     return vars;

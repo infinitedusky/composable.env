@@ -96,6 +96,141 @@ describe('service pseudo-component', () => {
 
       expect(result['local-app.host']).toBeUndefined();
     });
+
+    describe('proxy-aware (proxy: caddy + subdomain)', () => {
+      it('address resolves to {subdomain}.{domain} when proxied', () => {
+        const contracts = new Map();
+        contracts.set('auth-server', {
+          name: 'auth-server',
+          target: {
+            type: 'docker-compose',
+            file: 'docker-compose.yml',
+            service: 'auth-server',
+            subdomain: 'auth',
+          },
+          vars: {},
+        });
+
+        const result = builder.exposedGenerateServiceVars(
+          contracts, 'local', {
+            suffix: '-local',
+            domain: 'numero.local',
+            proxy: 'caddy',
+          }
+        );
+
+        // host stays Docker DNS — internal calls still use this
+        expect(result['auth-server.host']).toBe('auth-server-local');
+        // address is the public Caddy vhost
+        expect(result['auth-server.address']).toBe('auth.numero.local');
+        // protocol is https — Caddy provides TLS
+        expect(result['auth-server.protocol']).toBe('https');
+      });
+
+      it('proxy: "both" also triggers proxy-aware behavior', () => {
+        const contracts = new Map();
+        contracts.set('admin', {
+          name: 'admin',
+          target: {
+            type: 'docker-compose', file: 'docker-compose.yml', service: 'admin',
+            subdomain: 'admin',
+          },
+          vars: {},
+        });
+
+        const result = builder.exposedGenerateServiceVars(
+          contracts, 'local', {
+            suffix: '-local',
+            domain: 'numero.local',
+            proxy: 'both',
+          }
+        );
+
+        expect(result['admin.address']).toBe('admin.numero.local');
+        expect(result['admin.protocol']).toBe('https');
+      });
+
+      it('contract WITHOUT subdomain stays on Docker DNS even when proxy is set', () => {
+        // Internal services (redis, postgres, etc.) aren't browser-routable.
+        // Their service.address should keep returning the Docker DNS form
+        // so other containers can reach them via the internal network.
+        const contracts = new Map();
+        contracts.set('redis', {
+          name: 'redis',
+          target: {
+            type: 'docker-compose', file: 'docker-compose.yml', service: 'redis',
+            // No subdomain — internal-only
+          },
+          vars: {},
+        });
+
+        const result = builder.exposedGenerateServiceVars(
+          contracts, 'local', {
+            suffix: '-local',
+            domain: 'numero.local',
+            proxy: 'caddy',
+          }
+        );
+
+        expect(result['redis.host']).toBe('redis-local');
+        expect(result['redis.address']).toBe('redis-local.numero.local');
+        expect(result['redis.protocol']).toBe('http');
+      });
+
+      it('proxy: "nginx" (default) does NOT change address — only caddy does', () => {
+        // nginx config is typically configured for TLS production-side, but
+        // composable.env doesn't manage that cert chain — only Caddy is
+        // turnkey TLS. Keep the address on Docker DNS for nginx profiles
+        // unless the user explicitly opts into proxy: "caddy" for the
+        // specific local-dev shape Caddy provides.
+        const contracts = new Map();
+        contracts.set('admin', {
+          name: 'admin',
+          target: {
+            type: 'docker-compose', file: 'docker-compose.yml', service: 'admin',
+            subdomain: 'admin',
+          },
+          vars: {},
+        });
+
+        const result = builder.exposedGenerateServiceVars(
+          contracts, 'production', {
+            suffix: '',
+            domain: 'example.com',
+            proxy: 'nginx',
+          }
+        );
+
+        // No proxy:caddy → address stays on Docker DNS form
+        expect(result['admin.address']).toBe('admin.example.com');
+        // (Happens to look right because suffix is "" in production, but the
+        // logic isn't proxy-aware here — it's just the Docker DNS form.)
+        expect(result['admin.protocol']).toBe('http');
+      });
+
+      it('per-service domain override flows through to the proxy address', () => {
+        const contracts = new Map();
+        contracts.set('admin', {
+          name: 'admin',
+          target: {
+            type: 'docker-compose', file: 'docker-compose.yml', service: 'admin',
+            subdomain: 'admin',
+          },
+          vars: {},
+        });
+
+        const result = builder.exposedGenerateServiceVars(
+          contracts, 'production', {
+            suffix: '',
+            domain: 'chitin.casino',
+            proxy: 'caddy',
+            override: { admin: { domain: 'admin-panel.example.com' } },
+          }
+        );
+
+        expect(result['admin.address']).toBe('admin.admin-panel.example.com');
+      });
+    });
   });
 
   describe('REGRESSION: service vars resolve in components', () => {

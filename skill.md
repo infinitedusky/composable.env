@@ -622,6 +622,24 @@ URL=${service.game-server.protocol}://${service.game-server.address}:${game-serv
 
 Components can still override service vars by defining the same key explicitly — the auto-generated values are defaults that components and contracts build on top of.
 
+**Proxy-aware addresses:** When the profile has `proxy: "caddy"` (or `"both"`) AND a contract declares `target.subdomain`, the auto-generated `address` and `protocol` switch to the proxy's public vhost — not the Docker DNS form. This matters for browser-facing env vars like `NEXT_PUBLIC_AUTH_BASE_URL` that need the URL the *browser* uses, not the URL one container uses to reach another:
+
+| Setup | `${service.auth-server.address}` | `${service.auth-server.protocol}` |
+|-------|---------|---------|
+| `proxy` not set | `auth-server-local.numero.local` (Docker DNS) | `http` |
+| `proxy: "caddy"` + `subdomain: "auth"` | `auth.numero.local` (Caddy vhost) | `https` |
+| `proxy: "caddy"`, contract has no `subdomain` | `auth-server-local.numero.local` (internal-only service, not proxy-routable) | `http` |
+
+`${service.<name>.host}` always returns the Docker DNS form regardless of proxy config — that's the name container-to-container traffic uses on the internal network, which doesn't go through the proxy. So a typical pair:
+
+```ini
+# Internal call (one container → another, bypasses Caddy)
+INTERNAL_AUTH_URL=http://${service.auth-server.host}:${auth-server.PORT}
+
+# Browser-facing URL (goes through Caddy, https + public vhost)
+NEXT_PUBLIC_AUTH_BASE_URL=${service.auth-server.protocol}://${service.auth-server.address}
+```
+
 ### Profile-global vars (`${profile.*}`)
 
 Alongside `${service.<name>.*}`, ce auto-injects a `${profile.*}` namespace for **profile-global** primitives — values that don't depend on which service you're configuring:
