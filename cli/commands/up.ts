@@ -312,6 +312,38 @@ export function registerUpCommand(program: Command): void {
         process.exit(1);
       }
 
+      // 2.5. Doctor: when proxy: "caddy" + a custom .local domain is in use,
+      // check that macOS has a /etc/resolver/{tld} entry pointing at 127.0.0.1.
+      // Without it, *.{domain} hostnames don't resolve in the browser and
+      // every browser request gets DNS_PROBE_FINISHED_NXDOMAIN. Containers
+      // are unaffected (they use Docker's embedded DNS for service-to-service
+      // calls). Warn-only — services still start, user can curl --resolve
+      // until they have time to run setup-dns.sh (it needs sudo).
+      if (process.platform === 'darwin' && profileConfig?.proxy && profileConfig.domain) {
+        const usesCaddy = profileConfig.proxy === 'caddy' || profileConfig.proxy === 'both';
+        const isOrbStack = profileConfig.domain.endsWith('.orb.local');
+        if (usesCaddy && !isOrbStack) {
+          // TLD = everything after the first dot, e.g. "numero.local" → "local"
+          const parts = profileConfig.domain.split('.');
+          if (parts.length >= 2) {
+            const tld = parts.slice(1).join('.');
+            const resolverFile = `/etc/resolver/${tld}`;
+            if (!fs.existsSync(resolverFile)) {
+              console.error(chalk.yellow(`⚠️  Host DNS not configured for *.${profileConfig.domain}`));
+              console.error(chalk.gray(`   Browser requests to *.${profileConfig.domain} will fail with DNS_PROBE_FINISHED_NXDOMAIN`));
+              console.error(chalk.gray(`   until you set up the macOS resolver (one-time, needs sudo):`));
+              console.error('');
+              console.error(chalk.gray(`     ./scripts/dev/setup-dns.sh`));
+              console.error('');
+              console.error(chalk.gray(`   Container-to-container traffic (Docker DNS) is unaffected.`));
+              console.error(chalk.gray(`   You can also test with curl --resolve:`));
+              console.error(chalk.gray(`     curl -k --resolve <host>.${profileConfig.domain}:443:127.0.0.1 https://<host>.${profileConfig.domain}/`));
+              console.error('');
+            }
+          }
+        }
+      }
+
       // 3. Down existing services for this profile
       console.log(chalk.blue(`Stopping existing ${profile} services...`));
       try {
