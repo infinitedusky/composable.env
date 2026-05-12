@@ -849,6 +849,26 @@ export class EnvironmentBuilder {
             serviceVars['CE_TLS_PORT'] = serviceVars['PORT'] || 'true';
           }
 
+          // Auto-emit build.args.APP_NAME from the contract's command field
+          // when the service builds from a Dockerfile that needs it (the
+          // turbo-prune dev templates require ARG APP_NAME). Source of truth
+          // is the contract's command — the same pnpm filter name turbo
+          // uses as its --scope. Won't override if the user already set
+          // build.args.APP_NAME explicitly.
+          if (effectiveConfig) {
+            const cmd = effectiveConfig.command as string | undefined;
+            const build = effectiveConfig.build as { context?: string; dockerfile?: string; args?: Record<string, string> } | string | undefined;
+            if (cmd && typeof build === 'object' && build !== null) {
+              const existingArgs = build.args || {};
+              if (!existingArgs.APP_NAME) {
+                effectiveConfig = {
+                  ...effectiveConfig,
+                  build: { ...build, args: { ...existingArgs, APP_NAME: cmd } },
+                };
+              }
+            }
+          }
+
           composeGroups.get(filePath)!.push({
             contractName: serviceName,
             serviceName: contract.target.service,
