@@ -101,9 +101,9 @@ This creates everything above plus:
 - `local` and `production` profiles
 - `networking.env` component with OrbStack `.orb.local` DNS setup
 - `networking.vars.json` for shared networking vars across contracts
-- `docker/Dockerfile.nextdev` (hot reload via volume mounts; two-stage `turbo prune --docker` install — requires turbo at the workspace root)
+- `docker/Dockerfile.nextdev` (hot reload via volume mounts)
 - `docker/Dockerfile.nextprod` (standalone production build)
-- `docker/Dockerfile.vitepressdev` (VitePress hot reload; same `turbo prune` pattern)
+- `docker/Dockerfile.vitepressdev` (VitePress hot reload)
 - `docker/Dockerfile.vitepressprod` (VitePress static build with nginx)
 - `apps/docs/` with full VitePress site (config.ts, index.md, guide pages)
 - Example app contract with docker-compose target + `profileOverrides`
@@ -706,28 +706,11 @@ Dockerfiles use `ENTRYPOINT ["/usr/local/bin/app-entrypoint.sh"]`. Contracts pas
 
 The entrypoint receives `@myorg/myapp` as `$1` and runs `pnpm --filter @myorg/myapp dev` (or `build` + `start` in production). Env vars pass through because turbo is never invoked.
 
-### Workspace dep installation: `turbo prune --docker`
+### Workspace dep installation: wholesale COPY
 
-The dev Dockerfiles (`Dockerfile.nextdev`, `Dockerfile.vitepressdev`) use a two-stage build with `turbo prune --docker` to install only what each app's dep graph needs. Stage 1 prunes the workspace down to the app's subset; stage 2 runs `pnpm install` against just that subset.
+The dev Dockerfiles (`Dockerfile.nextdev`, `Dockerfile.vitepressdev`) install workspace dependencies via wholesale COPY of `apps/` and `packages/` before `pnpm install --frozen-lockfile`. This works with every pnpm workspace shape, including `dependenciesMeta.injected` deps that other approaches (notably `turbo prune --docker`) can't serialize.
 
-Why: per-app COPY enumeration of `apps/*/package.json` doesn't include workspace `packages/*`, and a wholesale `COPY packages/` invalidates the install cache for every app whenever any package changes. Turbo's pruner walks the dep graph from a named scope — only the relevant package.json files end up in the install context, and unrelated package changes don't bust the cache.
-
-The prune scope is set per service via `build.args.APP_NAME`. composable.env auto-derives this from the contract's `command` field (the same pnpm filter string), so contracts don't need any new fields:
-
-```json
-{
-  "target": {
-    "config": {
-      "build": { "context": ".", "dockerfile": "docker/Dockerfile.nextdev" },
-      "command": "@myorg/myapp"
-    }
-  }
-}
-```
-
-ce emits `build.args.APP_NAME: "@myorg/myapp"` automatically. If a contract sets `build.args.APP_NAME` explicitly, ce respects that override.
-
-Requires `turbo` as a dev dependency at the workspace root. If a project doesn't use turbo, replace the scaffolded Dockerfiles with a different install strategy.
+Trade-off: changing any file in `apps/` or `packages/` invalidates the install layer for every service. For projects with many services and frequent package edits, this can mean longer rebuild times. If your project doesn't use injected deps and the cache invalidation hurts, replace the scaffolded Dockerfile with a tighter pattern (per-app COPY enumeration or a tool that handles your workspace shape).
 
 ## Anti-patterns to watch for
 
