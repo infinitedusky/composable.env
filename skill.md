@@ -622,6 +622,37 @@ URL=${service.game-server.protocol}://${service.game-server.address}:${game-serv
 
 Components can still override service vars by defining the same key explicitly — the auto-generated values are defaults that components and contracts build on top of.
 
+### Profile-global vars (`${profile.*}`)
+
+Alongside `${service.<name>.*}`, ce auto-injects a `${profile.*}` namespace for **profile-global** primitives — values that don't depend on which service you're configuring:
+
+| Reference | Returns |
+|-----------|---------|
+| `${profile.name}` | Current profile name (`"local"`, `"staging"`, `"production"`) |
+| `${profile.suffix}` | The profile's `suffix` from `ce.json` (`"-local"`, `"-stg"`, `""`) |
+| `${profile.domain}` | The profile's `domain` from `ce.json` (`"numero.local"`, `"chitin.casino"`) |
+| `${profile.protocol}` | `"https"` when `tls: true`, otherwise `"http"` |
+
+Use these in components and contracts when the value applies to the whole profile, not a specific service. Example:
+
+```ini
+# auth.env
+COOKIE_DOMAIN=${profile.domain}
+```
+
+```json
+// vars/platform-base.vars.json
+{
+  "vars": {
+    "NEXT_PUBLIC_DOMAIN": "${profile.domain}",
+    "NEXT_PUBLIC_PROFILE_SUFFIX": "${profile.suffix}",
+    "NODE_ENV": "${profile.name}"
+  }
+}
+```
+
+This replaces the common pattern of hand-rolling a `networking.env` component with `DOMAIN=` / `PROFILE_SUFFIX=` per profile section — the data already lives in `ce.json`, and `${profile.*}` exposes it directly.
+
 ### Automatic TLS with mkcert
 
 When a profile has `tls: true` and a `domain`, `pnpm ce dc:up` automatically:

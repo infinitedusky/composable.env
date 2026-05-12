@@ -155,6 +155,13 @@ export class TestableBuilder extends EnvironmentBuilder {
     return (this as any).generateServiceVars(contracts, profileName, profileConfig);
   }
 
+  public exposedGenerateProfileVars(
+    profileName: string,
+    profileConfig: any
+  ): Record<string, string> {
+    return (this as any).generateProfileVars(profileName, profileConfig);
+  }
+
   public exposedFlattenComponentPool(pool: Map<string, Record<string, string>>): Record<string, string> {
     return (this as any).flattenComponentPool(pool);
   }

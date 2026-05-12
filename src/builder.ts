@@ -463,6 +463,30 @@ export class EnvironmentBuilder {
   }
 
   /**
+   * Generate profile.* pseudo-variables — profile-global primitives.
+   * Use these in components/contracts when you want the profile-level
+   * suffix/domain/protocol/name without naming a specific service.
+   *
+   * Keys: name, suffix, domain, protocol.
+   *
+   * Example component usage:
+   *   COOKIE_DOMAIN=${profile.domain}
+   *   NODE_ENV=${profile.name === 'local' ? ...}  // ce doesn't do ternaries,
+   *   // so use a per-section [local]/[production] override or pair with defaults
+   */
+  private generateProfileVars(
+    profileName: string,
+    profileConfig: CeProfileConfig
+  ): Record<string, string> {
+    return {
+      name: profileName,
+      suffix: profileConfig.suffix,
+      domain: profileConfig.domain || '',
+      protocol: profileConfig.tls ? 'https' : 'http',
+    };
+  }
+
+  /**
    * Generate service.* pseudo-variables for all target contracts.
    * For each service: host, address, suffix, domain, protocol.
    * Keys are dotted: "game-server.host", "game-server.address", etc.
@@ -622,7 +646,10 @@ export class EnvironmentBuilder {
         // New format: component-scoped pool + secrets layer
         componentPool = await this.loadScopedComponentPool(profile.components, profileName || 'default', isDefaultWithoutProfile);
 
-        // Inject service.* pseudo-component with auto-generated vars
+        // Inject service.* and profile.* pseudo-components with auto-generated vars.
+        // - service.<name>.<prop> for per-service primitives (host, address, etc.)
+        // - profile.<prop> for profile-global primitives (name, suffix, domain,
+        //   protocol) — useful when the value doesn't depend on a specific service.
         const config = loadConfig(this.configDir);
         const pName = profileName || 'default';
         const profileConfig = config.profiles?.[pName];
@@ -632,8 +659,11 @@ export class EnvironmentBuilder {
           );
           if (Object.keys(serviceVars).length > 0) {
             componentPool.set('service', serviceVars);
-            this.resolveCrossComponentRefs(componentPool);
           }
+          // profile.* is always available when profile config exists, even when
+          // there are no service contracts (env-only projects can still use it).
+          componentPool.set('profile', this.generateProfileVars(pName, profileConfig));
+          this.resolveCrossComponentRefs(componentPool);
         }
 
         flatPool = this.flattenComponentPool(componentPool);
