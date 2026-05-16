@@ -16,12 +16,17 @@ export interface CaddyfileWriteResult {
  * Output is intentionally minimal — one site block per hostname,
  * with reverse_proxy pointing at the container's Docker DNS name.
  * Caddy's automatic HTTPS (via its internal CA on .local hosts, or
- * Let's Encrypt elsewhere) handles certs without extra config.
+ * Let's Encrypt elsewhere) handles certs without extra config —
+ * unless tlsInternal is set, in which case we explicitly tell Caddy
+ * to use its internal CA for every vhost (needed for .test, .dev, or
+ * any non-.local local-dev TLD where Caddy would otherwise try
+ * Let's Encrypt and fail).
  */
 function generateCaddyfile(
   entries: ProxyEntry[],
   domain: string,
   profileName: string,
+  tlsInternal: boolean,
 ): string {
   const lines: string[] = [
     GENERATED_HEADER,
@@ -32,15 +37,16 @@ function generateCaddyfile(
   for (const entry of entries) {
     const hostname = `${entry.subdomain}.${domain}`;
     // Site block — Caddy auto-issues a cert (internal CA on .local,
-    // Let's Encrypt otherwise). reverse_proxy handles WebSockets natively
-    // and re-resolves Docker DNS per request, so container restarts
-    // don't leave a stale cached IP.
-    lines.push(
-      `${hostname} {`,
-      `\treverse_proxy ${entry.serviceName}:${entry.port}`,
-      `}`,
-      ``,
-    );
+    // Let's Encrypt otherwise unless tls internal is set explicitly).
+    // reverse_proxy handles WebSockets natively and re-resolves
+    // Docker DNS per request, so container restarts don't leave a
+    // stale cached IP.
+    lines.push(`${hostname} {`);
+    if (tlsInternal) {
+      lines.push(`\ttls internal`);
+    }
+    lines.push(`\treverse_proxy ${entry.serviceName}:${entry.port}`);
+    lines.push(`}`, ``);
   }
 
   return lines.join('\n');
@@ -58,6 +64,7 @@ export function writeCaddyfiles(
   profileNames: string[],
   profileSuffixes: Record<string, string>,
   profileDomains: Record<string, string>,
+  profileTlsInternal: Record<string, boolean> = {},
 ): CaddyfileWriteResult[] {
   const results: CaddyfileWriteResult[] = [];
 
@@ -79,7 +86,8 @@ export function writeCaddyfiles(
     const entries = collectProxyEntries(contracts, suffix);
     if (entries.length === 0) continue;
 
-    const content = generateCaddyfile(entries, domain, profileName);
+    const tlsInternal = profileTlsInternal[profileName] ?? false;
+    const content = generateCaddyfile(entries, domain, profileName, tlsInternal);
     const fileName = emittingProfiles.length === 1
       ? 'Caddyfile'
       : `Caddyfile.${profileName}`;

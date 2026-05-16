@@ -345,6 +345,79 @@ describe('Caddy emitter (integration)', () => {
     expect(compose).not.toContain('caddy:2-alpine');
   });
 
+  it('emits "tls internal" inside vhost blocks when profile.tlsInternal is true', async () => {
+    // For non-.local TLDs (.test, .dev, etc.) Caddy's default behavior is
+    // to try Let's Encrypt — which fails locally because there's no public
+    // DNS. tlsInternal: true forces Caddy to use its internal CA instead.
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'test',
+      profiles: {
+        test: {
+          suffix: '',
+          domain: 'numero.test',
+          proxy: 'caddy',
+          tlsInternal: true,
+        },
+      },
+    });
+    writeProfile(tmpDir, 'test', { name: 'test', description: 'Test' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'admin',
+        subdomain: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ test: '' });
+    expect(result.success).toBe(true);
+
+    const caddyPath = path.join(tmpDir, 'Caddyfile');
+    expect(fs.existsSync(caddyPath)).toBe(true);
+
+    const content = fs.readFileSync(caddyPath, 'utf8');
+    expect(content).toContain('admin.numero.test {');
+    expect(content).toContain('tls internal');
+    expect(content).toContain('reverse_proxy admin:3664');
+  });
+
+  it('omits "tls internal" by default (so .local domains use Caddy default)', async () => {
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local', proxy: 'caddy' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: 'docker-compose.yml',
+        service: 'admin',
+        subdomain: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+
+    const result = await buildAll({ local: '-local' });
+    expect(result.success).toBe(true);
+
+    const content = fs.readFileSync(path.join(tmpDir, 'Caddyfile'), 'utf8');
+    expect(content).toContain('admin.numero.local {');
+    // No explicit tls directive — Caddy's default auto-issues internal CA on .local
+    expect(content).not.toContain('tls internal');
+  });
+
   it('auto-gitignores the generated Caddyfile', async () => {
     writeCeConfig(tmpDir, {
       envDir: 'env',

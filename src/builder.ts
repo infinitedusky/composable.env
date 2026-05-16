@@ -923,11 +923,13 @@ export class EnvironmentBuilder {
       // emitter via ce.json profiles[p].proxy (defaults to "nginx").
       if (profileConfigs) {
         const profileDomains: Record<string, string> = {};
+        const profileTlsInternal: Record<string, boolean> = {};
         const nginxProfiles: string[] = [];
         const caddyProfiles: string[] = [];
         for (const [name, config] of Object.entries(profileConfigs)) {
           if (!config.domain) continue;
           profileDomains[name] = config.domain;
+          if (config.tlsInternal) profileTlsInternal[name] = true;
           const proxy = config.proxy ?? 'nginx';
           if (proxy === 'nginx' || proxy === 'both') nginxProfiles.push(name);
           if (proxy === 'caddy' || proxy === 'both') caddyProfiles.push(name);
@@ -977,6 +979,7 @@ export class EnvironmentBuilder {
             caddyProfiles,
             profileSuffixes || {},
             profileDomains,
+            profileTlsInternal,
           );
           for (const result of caddyResults) {
             generatedFiles.push(result.filePath);

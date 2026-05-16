@@ -99,6 +99,12 @@ export const CeProfileConfigSchema = z.object({
   // "caddy" writes Caddyfile, "both" emits both. Defaults to nginx when
   // omitted to preserve existing behavior.
   proxy: z.enum(['nginx', 'caddy', 'both']).optional(),
+  // When true, the generated Caddyfile emits `tls internal` inside each
+  // vhost block — forces Caddy to use its internal CA regardless of
+  // domain. Needed for local-dev TLDs that aren't `.local` / `.localhost`
+  // (e.g., `.test`), where Caddy's default behavior would try Let's
+  // Encrypt and fail because there's no public DNS.
+  tlsInternal: z.boolean().optional(),
   override: z.record(z.string(), CeServiceOverrideSchema).optional(),
 }).strict();
 
