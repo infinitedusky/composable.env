@@ -131,7 +131,11 @@ export class EnvironmentBuilder {
         }
       }
 
-      // Build merged components: [default] + inheritance chain sections per component
+      // Build merged components: [default] + (explicit override OR inheritance chain).
+      // If a profile JSON sets components.<name> explicitly, that selection wins —
+      // the inheritance chain is NOT appended after it. Without this guard, a
+      // parent profile's section silently overrides the explicit child override
+      // because sections later in the list win during resolution.
       const mergedComponents: Components = {};
       for (const component of allComponents) {
         const sections: string[] = ['default'];
@@ -141,10 +145,6 @@ export class EnvironmentBuilder {
           Array.isArray(override) ? sections.push(...override) : sections.push(override);
         } else if (inheritanceChain.length > 0) {
           sections.push(...inheritanceChain);
-        }
-
-        for (const chainProfile of inheritanceChain) {
-          if (!sections.includes(chainProfile)) sections.push(chainProfile);
         }
 
         mergedComponents[component] = sections;
