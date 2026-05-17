@@ -366,6 +366,19 @@ The `{profile}` placeholder splits output into one file per profile — `docker-
 
 Switch shape per project by changing the `target.file` value in your contracts. The two shapes can coexist if some contracts use the placeholder and others don't.
 
+**Global flag — `composeFilePerProfile: true` in ce.json:** flips every contract into per-profile-file mode without editing each `target.file`. Equivalent to inserting `{profile}` into every contract's path automatically. Useful when you have many contracts and want the per-profile behavior globally:
+
+```json
+{
+  "envDir": "env",
+  "defaultProfile": "local",
+  "composeFilePerProfile": true,
+  "profiles": { ... }
+}
+```
+
+With the flag on, a contract with `"file": "docker-compose.yml"` writes `docker-compose.{profile}.yml`. Contracts that already have `{profile}` in the path are unchanged.
+
 #### Single-file shape — the YAML it generates
 
 When `pnpm ce env:build` detects target contracts, it builds **all profiles** (from `env/profiles/*.json` — not component sections) into one compose file. Shared Docker config (image, ports, volumes) goes into `x-` YAML anchor blocks. Per-profile variants use `<<: *anchor` merge and Docker Compose `profiles:` arrays:

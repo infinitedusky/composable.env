@@ -115,6 +115,17 @@ export const CeConfigSchema = z.object({
   defaultProfile: z.string().default('default'),
   profiles: z.record(z.string(), CeProfileConfigSchema).optional(),
   scaffold: z.string().optional(),
+  // When true, ce writes one docker-compose file per profile instead of
+  // packing every profile into one shared docker-compose.yml. Equivalent
+  // to adding `{profile}` to every contract's target.file but applied
+  // globally — no per-contract edits needed.
+  //
+  // Use this when profile suffixes can't be made unique (e.g., multiple
+  // dev profiles where you don't want a -local / -test suffix on service
+  // names). Each profile's file is its own namespace, so service names
+  // are clean (admin-server, not admin-server-local) and suffixes can
+  // be empty across the board.
+  composeFilePerProfile: z.boolean().optional(),
 }).strict();
 
 export type CeConfig = z.infer<typeof CeConfigSchema>;

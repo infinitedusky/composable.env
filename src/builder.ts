@@ -50,6 +50,29 @@ function substituteProfileInPath(filePath: string, profileName: string): string 
   return filePath.replace(/\{profile\}/g, profileName);
 }
 
+/**
+ * Apply ce.json's `composeFilePerProfile: true` to a compose file path by
+ * injecting `.{profile}` before the file extension when the path doesn't
+ * already contain `{profile}`. Lets users opt into per-profile compose
+ * files globally without editing every contract's target.file.
+ *
+ * Examples (perProfile: true):
+ *   docker-compose.yml         → docker-compose.{profile}.yml
+ *   infra/compose.yml          → infra/compose.{profile}.yml
+ *   docker-compose.{profile}.yml → unchanged (already templated)
+ */
+function applyPerProfileFileMode(filePath: string, perProfile: boolean): string {
+  if (!perProfile) return filePath;
+  if (filePath.includes('{profile}')) return filePath;
+  const lastDot = filePath.lastIndexOf('.');
+  const lastSlash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+  // Only treat as extension if the dot is in the basename
+  if (lastDot > lastSlash) {
+    return `${filePath.slice(0, lastDot)}.{profile}${filePath.slice(lastDot)}`;
+  }
+  return `${filePath}.{profile}`;
+}
+
 function resolveContractPath(p: string, base: string): string {
   const expanded = expandHome(p);
   if (path.isAbsolute(expanded)) return expanded;
@@ -816,9 +839,12 @@ export class EnvironmentBuilder {
 
         if (contract.target?.type === 'docker-compose') {
           // Docker-compose target — collect entries grouped by file.
-          // {profile} placeholder in target.file enables per-profile output
+          // {profile} placeholder in target.file OR ce.json
+          // composeFilePerProfile: true splits output into per-profile
           // files. Persistent contracts go to a separate compose file.
-          const substitutedFilePath = substituteProfileInPath(contract.target.file, currentProfile);
+          const perProfileMode = loadConfig(this.configDir).composeFilePerProfile === true;
+          const pathWithPlaceholder = applyPerProfileFileMode(contract.target.file, perProfileMode);
+          const substitutedFilePath = substituteProfileInPath(pathWithPlaceholder, currentProfile);
           const filePath = contract.persistent
             ? substitutedFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
             : substitutedFilePath;
@@ -1847,10 +1873,12 @@ export class EnvironmentBuilder {
     const resolvedPool = this.resolveVariables(flatPool, true /* quiet */);
 
     // Build compose entries
+    const perProfileModeOther = ceConfig.composeFilePerProfile === true;
     for (const [serviceName, contract] of availableContracts) {
       if (contract.target?.type !== 'docker-compose') continue;
 
-      const substitutedFilePath = substituteProfileInPath(contract.target.file, profileName);
+      const pathWithPlaceholder = applyPerProfileFileMode(contract.target.file, perProfileModeOther);
+      const substitutedFilePath = substituteProfileInPath(pathWithPlaceholder, profileName);
       const filePath = contract.persistent
         ? substitutedFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
         : substitutedFilePath;
