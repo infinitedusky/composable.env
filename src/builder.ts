@@ -898,8 +898,9 @@ export class EnvironmentBuilder {
         }
       }
 
+      // Convert current profile's compose entries to multi-profile shape
+      const multiComposeGroups = new Map<string, ComposeMultiProfileEntry[]>();
       for (const [filePath, entries] of composeGroups) {
-        // Convert single-profile entries to multi-profile format
         const multiEntries: ComposeMultiProfileEntry[] = entries.map(e => {
           const contract = availableContracts.get(e.contractName);
           const dcTarget = contract?.target?.type === 'docker-compose' ? contract.target : undefined;
@@ -911,8 +912,31 @@ export class EnvironmentBuilder {
               : undefined,
           };
         });
+        multiComposeGroups.set(filePath, multiEntries);
+      }
+
+      // Augment with compose entries from EVERY OTHER profile so the
+      // generated docker-compose.yml is multi-profile complete regardless
+      // of which profile was just built. `docker compose --profile <X> up`
+      // then works without re-running env:build for that profile.
+      const ceConfigForOthers = loadConfig(this.configDir);
+      const allProfileNamesForCompose = profileSuffixes
+        ? Object.keys(profileSuffixes)
+        : [currentProfile];
+      for (const otherProfile of allProfileNamesForCompose) {
+        if (otherProfile === currentProfile) continue;
+        const otherEntries = await this.collectComposeEntriesForOtherProfile(
+          otherProfile, ceConfigForOthers, serveMode
+        );
+        for (const [filePath, entries] of otherEntries) {
+          if (!multiComposeGroups.has(filePath)) multiComposeGroups.set(filePath, []);
+          multiComposeGroups.get(filePath)!.push(...entries);
+        }
+      }
+
+      for (const [filePath, entries] of multiComposeGroups) {
         const result = await writeMultiProfileComposeFile(
-          filePath, multiEntries, profileNames, profileSuffixes, composeName
+          filePath, entries, profileNames, profileSuffixes, composeName
         );
         warnings.push(...result.warnings);
         generatedFiles.push(filePath);
@@ -1676,5 +1700,204 @@ export class EnvironmentBuilder {
       return result;
     }
     return obj;
+  }
+
+  /**
+   * Compute docker-compose entries for a SINGLE profile without writing
+   * .env files, running strict validation, or generating proxy configs.
+   * Returns entries grouped by compose file path, ready to merge into
+   * buildServiceEnvironments' composeGroups.
+   *
+   * Purpose: `env:build <profile>` builds .env files only for that profile,
+   * but the docker-compose.yml must include EVERY profile's services so
+   * `docker compose --profile <X> up` works regardless of which profile
+   * was last built. This helper produces the other profiles' entries.
+   *
+   * Best-effort — unresolvable vars get their defaults (or are dropped),
+   * not errors. The user is building a different profile and shouldn't
+   * fail just because some OTHER profile has a missing var.
+   */
+  private async collectComposeEntriesForOtherProfile(
+    profileName: string,
+    ceConfig: import('./types.js').CeConfig,
+    serveMode: Set<string> | 'all' | undefined,
+  ): Promise<Map<string, ComposeMultiProfileEntry[]>> {
+    const result = new Map<string, ComposeMultiProfileEntry[]>();
+    const allComponents = this.discoverComponents();
+    if (allComponents.length === 0) return result;
+
+    // Resolve profile data (same shape as buildFromProfile)
+    let profileOverrides: Record<string, string | string[]> = {};
+    let inheritanceChain: string[] = [profileName];
+    let profileExists = false;
+
+    if (profileName === 'default') {
+      inheritanceChain = [];
+      profileExists = true;
+    } else {
+      const profilePath = path.join(this.configDir, this.envDir, 'profiles', `${profileName}.json`);
+      if (fs.existsSync(profilePath)) {
+        const loaded = this.loadProfileWithInheritance(profileName);
+        profileOverrides = loaded.profileOverrides;
+        inheritanceChain = loaded.inheritanceChain;
+        profileExists = true;
+      } else if (this.profileSectionExists(profileName, allComponents)) {
+        inheritanceChain = [profileName];
+        profileExists = true;
+      }
+    }
+    if (!profileExists) return result;
+
+    // Build merged components
+    const mergedComponents: Components = {};
+    for (const component of allComponents) {
+      const sections: string[] = ['default'];
+      if (profileOverrides[component]) {
+        const override = profileOverrides[component];
+        Array.isArray(override) ? sections.push(...override) : sections.push(override);
+      } else if (inheritanceChain.length > 0) {
+        sections.push(...inheritanceChain);
+      }
+      mergedComponents[component] = sections;
+    }
+
+    // Filter contracts by onlyProfiles
+    const allContracts = this.contracts.getContracts();
+    const availableContracts = new Map(
+      [...allContracts].filter(([, contract]) => {
+        if (!contract.onlyProfiles || contract.onlyProfiles.length === 0) return true;
+        return contract.onlyProfiles.includes(profileName);
+      })
+    );
+
+    // Auto-inject synthetic caddy contract (same logic as buildServiceEnvironments)
+    const profileCfg = ceConfig.profiles?.[profileName];
+    const wantsCaddy = profileCfg?.proxy === 'caddy' || profileCfg?.proxy === 'both';
+    let subdomainComposeFile: string | undefined;
+    for (const c of availableContracts.values()) {
+      if (c.target?.type === 'docker-compose' && c.target.subdomain) {
+        subdomainComposeFile = c.target.file;
+        break;
+      }
+    }
+    if (wantsCaddy && subdomainComposeFile && !availableContracts.has('caddy')) {
+      const allProfileNames = ceConfig.profiles ? Object.keys(ceConfig.profiles) : [profileName];
+      const emittingCaddyProfiles = allProfileNames.filter(p => {
+        const cfg = ceConfig.profiles?.[p];
+        return (cfg?.proxy === 'caddy' || cfg?.proxy === 'both') && cfg?.domain;
+      });
+      const caddyfileName = emittingCaddyProfiles.length === 1
+        ? 'Caddyfile'
+        : `Caddyfile.${profileName}`;
+      availableContracts.set('caddy', {
+        name: 'caddy',
+        target: {
+          type: 'docker-compose',
+          file: subdomainComposeFile,
+          service: 'caddy',
+          config: {
+            image: 'caddy:2-alpine',
+            ports: ['80:80', '443:443'],
+            volumes: [
+              `./${caddyfileName}:/etc/caddy/Caddyfile:ro`,
+              'caddy_data:/data',
+              'caddy_config:/config',
+            ],
+            restart: 'unless-stopped',
+          },
+        },
+        vars: {},
+      });
+    }
+
+    // Load component pool + inject pseudo-components
+    const useNewFormat = this.contracts.hasNewFormatContracts();
+    let componentPool: Map<string, Record<string, string>> | undefined;
+    let flatPool: Record<string, string>;
+
+    if (useNewFormat) {
+      componentPool = await this.loadScopedComponentPool(mergedComponents, profileName, false);
+      if (profileCfg) {
+        const serviceVars = this.generateServiceVars(availableContracts, profileName, profileCfg);
+        if (Object.keys(serviceVars).length > 0) {
+          componentPool.set('service', serviceVars);
+        }
+        componentPool.set('profile', this.generateProfileVars(profileName, profileCfg));
+        this.resolveCrossComponentRefs(componentPool);
+      }
+      flatPool = this.flattenComponentPool(componentPool);
+    } else {
+      flatPool = await this.loadFlatComponentPool(mergedComponents);
+      await this.loadSharedFiles(flatPool);
+    }
+
+    const resolvedPool = this.resolveVariables(flatPool, true /* quiet */);
+
+    // Build compose entries
+    for (const [serviceName, contract] of availableContracts) {
+      if (contract.target?.type !== 'docker-compose') continue;
+
+      const baseFilePath = contract.target.file;
+      const filePath = contract.persistent
+        ? baseFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
+        : baseFilePath;
+      if (!result.has(filePath)) result.set(filePath, []);
+
+      let serviceVars: Record<string, string>;
+      if (useNewFormat && componentPool) {
+        serviceVars = this.contracts.mapVarsContract(serviceName, componentPool);
+      } else {
+        serviceVars = this.contracts.mapContractVariables(serviceName, resolvedPool);
+      }
+      if (contract.defaults) {
+        for (const [key, value] of Object.entries(contract.defaults)) {
+          if (serviceVars[key] === undefined) serviceVars[key] = value;
+        }
+      }
+
+      let effectiveConfig = contract.target.config;
+      const isServed = serveMode && (serveMode === 'all' || serveMode.has(serviceName));
+      if (isServed) {
+        const serveConfig = contract.serve?.config;
+        if (serveConfig && effectiveConfig) {
+          effectiveConfig = { ...effectiveConfig, ...serveConfig };
+        } else if (serveConfig) {
+          effectiveConfig = serveConfig;
+        }
+        serviceVars['NODE_ENV'] = 'production';
+      }
+
+      // In-container Caddy TLS (when profile.tls is true)
+      if (profileCfg?.tls && profileCfg?.domain) {
+        const domain = profileCfg.domain;
+        const certDir = `.certs/${domain}`;
+        if (effectiveConfig) {
+          const volumes = (effectiveConfig.volumes as string[]) || [];
+          const certMount = `./${certDir}:/app/.certs:ro`;
+          if (!volumes.includes(certMount)) {
+            effectiveConfig = { ...effectiveConfig, volumes: [...volumes, certMount] };
+          }
+        }
+        serviceVars['NODE_EXTRA_CA_CERTS'] = '/app/.certs/rootCA.pem';
+        serviceVars['CE_TLS_CERT'] = '/app/.certs/cert.pem';
+        serviceVars['CE_TLS_KEY'] = '/app/.certs/key.pem';
+        serviceVars['CE_TLS_PORT'] = serviceVars['PORT'] || 'true';
+      }
+
+      result.get(filePath)!.push({
+        contractName: serviceName,
+        serviceName: contract.target.service,
+        vars: serviceVars,
+        config: effectiveConfig
+          ? this.resolveConfigValues(effectiveConfig, resolvedPool)
+          : undefined,
+        profileName,
+        profileOverrides: contract.target.profileOverrides
+          ? this.resolveConfigValues(contract.target.profileOverrides, resolvedPool)
+          : undefined,
+      });
+    }
+
+    return result;
   }
 }

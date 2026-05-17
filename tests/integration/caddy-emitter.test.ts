@@ -418,6 +418,49 @@ describe('Caddy emitter (integration)', () => {
     expect(content).not.toContain('tls internal');
   });
 
+  it('REGRESSION: env:build <X> emits services for ALL profiles, not just X', async () => {
+    // Bug: env:build local would write a compose file with ONLY local
+    // services, dropping the test variants. Then dc:up test had nothing
+    // to start. Fix: every env:build re-resolves all other profiles for
+    // the compose output (only .env.{profile} files stay per-profile).
+    const composeFile = path.join(tmpDir, 'docker-compose.yml');
+    writeCeConfig(tmpDir, {
+      envDir: 'env',
+      defaultProfile: 'local',
+      profiles: {
+        local: { suffix: '-local', domain: 'numero.local' },
+        test:  { suffix: '-test',  domain: 'numero.test' },
+      },
+    });
+    writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+    writeProfile(tmpDir, 'test',  { name: 'test',  description: 'Test' });
+    writeComponent(tmpDir, 'admin', { default: {} });
+    writeContract(tmpDir, 'admin', {
+      name: 'admin',
+      target: {
+        type: 'docker-compose',
+        file: composeFile,
+        service: 'admin',
+        config: { ports: ['3664:3664'] },
+      },
+      vars: {},
+    });
+
+    // Build ONLY the local profile via the single-profile path
+    const builder = new EnvironmentBuilder(tmpDir, '', 'local');
+    await builder.initialize();
+    const result = await builder.buildFromProfile('local');
+    expect(result.success).toBe(true);
+
+    const compose = fs.readFileSync(composeFile, 'utf8');
+    // Both profile variants should appear — admin-local AND admin-test
+    expect(compose).toContain('admin-local');
+    expect(compose).toContain('admin-test');
+    // Both profile tags should appear
+    expect(compose).toContain('profiles:\n      - local');
+    expect(compose).toContain('profiles:\n      - test');
+  });
+
   it('auto-gitignores the generated Caddyfile', async () => {
     writeCeConfig(tmpDir, {
       envDir: 'env',
