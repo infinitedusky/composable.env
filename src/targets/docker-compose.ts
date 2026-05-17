@@ -154,6 +154,14 @@ export async function writeMultiProfileComposeFile(
     docContents.add(doc.createPair('name', doc.createNode(composeName)));
   }
 
+  // Detect "this file only contains one profile" — happens when target.file
+  // uses the {profile} placeholder so each profile gets its own output file.
+  // In that case skip emitting `profiles: [X]` on services so plain
+  // `docker compose -f docker-compose.X.yml up` works without --profile.
+  const distinctProfileNames = new Set<string>();
+  for (const entry of entries) distinctProfileNames.add(entry.profileName);
+  const isSingleProfileFile = distinctProfileNames.size === 1;
+
   // Collect all services (flat) for volume/network detection later
   const allServicesFlat: Record<string, Record<string, unknown>> = {};
 
@@ -216,8 +224,12 @@ export async function writeMultiProfileComposeFile(
           variantNode.add(new Pair(mergeKey, aliasNode));
         }
 
-        // Add profiles: [profileName]
-        variantNode.add(doc.createPair('profiles', doc.createNode([profileName])));
+        // Add profiles: [profileName] — but skip when the whole file is
+        // for one profile (per-profile compose files don't need runtime
+        // profile filtering since the file IS the profile selector).
+        if (!isSingleProfileFile) {
+          variantNode.add(doc.createPair('profiles', doc.createNode([profileName])));
+        }
 
         // Add depends_on with profiled service name rewriting
         const rawDependsOn = data.config.depends_on ?? sharedDependsOn;

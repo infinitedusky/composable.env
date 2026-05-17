@@ -353,7 +353,20 @@ Multiple contracts targeting the same compose service are **additive** — both 
 
 Today a contract has at most one `target`. To run the same contract via PM2 *and* Docker, add a legacy `dev` field as a sibling to the docker-compose target. v2 will introduce `targets: []` arrays for first-class multi-runtime support — see `docs/planning/targets-array-v2/`.
 
-### Multi-profile compose output
+### Compose file output: two shapes
+
+**Default — single compose file with all profiles** (`target.file: "docker-compose.yml"`):
+ce writes one file containing every profile's services, each variant suffixed (`admin-server-local`, `admin-server-test`) and tagged with `profiles: [X]` arrays. `docker compose --profile X up` selects at runtime. Profile suffixes MUST be unique because the `services:` map is flat — two profiles with the same suffix would collide on service names.
+
+**Per-profile files** (`target.file: "docker-compose.{profile}.yml"`):
+The `{profile}` placeholder splits output into one file per profile — `docker-compose.local.yml`, `docker-compose.test.yml`, `docker-compose.production.yml`. Each file is its own namespace, so service names can be clean (`admin-server` in every file, no suffix) and profile suffixes can be empty across the board. `pnpm ce dc:up <profile>` reads the matching file. No `--profile` flag needed at the Docker level since each file IS the profile selector. Use this shape when:
+- You want production service names to match dev (no `-local` / `-test` suffix discipline)
+- Profiles correspond to distinct environments you run one-at-a-time
+- You'd rather have multiple compose files than one big multi-profile one
+
+Switch shape per project by changing the `target.file` value in your contracts. The two shapes can coexist if some contracts use the placeholder and others don't.
+
+#### Single-file shape — the YAML it generates
 
 When `pnpm ce env:build` detects target contracts, it builds **all profiles** (from `env/profiles/*.json` — not component sections) into one compose file. Shared Docker config (image, ports, volumes) goes into `x-` YAML anchor blocks. Per-profile variants use `<<: *anchor` merge and Docker Compose `profiles:` arrays:
 

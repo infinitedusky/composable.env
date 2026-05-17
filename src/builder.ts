@@ -38,6 +38,18 @@ function expandHome(p: string): string {
  * Used for both `location` (resolved against project root) and `outputs[profile]`
  * (resolved against `location`).
  */
+/**
+ * Substitute the `{profile}` placeholder in a compose file path with the
+ * given profile name. Returns the path unchanged if no placeholder is
+ * present. Used to split docker-compose output into per-profile files
+ * (e.g., `docker-compose.{profile}.yml` → `docker-compose.local.yml`,
+ * `docker-compose.test.yml`). Each profile's file is its own namespace,
+ * so service names can repeat across profiles without collision.
+ */
+function substituteProfileInPath(filePath: string, profileName: string): string {
+  return filePath.replace(/\{profile\}/g, profileName);
+}
+
 function resolveContractPath(p: string, base: string): string {
   const expanded = expandHome(p);
   if (path.isAbsolute(expanded)) return expanded;
@@ -803,12 +815,13 @@ export class EnvironmentBuilder {
         }
 
         if (contract.target?.type === 'docker-compose') {
-          // Docker-compose target — collect entries grouped by file
-          // Persistent contracts go to a separate compose file
-          const baseFilePath = contract.target.file;
+          // Docker-compose target — collect entries grouped by file.
+          // {profile} placeholder in target.file enables per-profile output
+          // files. Persistent contracts go to a separate compose file.
+          const substitutedFilePath = substituteProfileInPath(contract.target.file, currentProfile);
           const filePath = contract.persistent
-            ? baseFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
-            : baseFilePath;
+            ? substitutedFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
+            : substitutedFilePath;
           if (!composeGroups.has(filePath)) {
             composeGroups.set(filePath, []);
           }
@@ -1837,10 +1850,10 @@ export class EnvironmentBuilder {
     for (const [serviceName, contract] of availableContracts) {
       if (contract.target?.type !== 'docker-compose') continue;
 
-      const baseFilePath = contract.target.file;
+      const substitutedFilePath = substituteProfileInPath(contract.target.file, profileName);
       const filePath = contract.persistent
-        ? baseFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
-        : baseFilePath;
+        ? substitutedFilePath.replace(/\.yml$/, '.persistent.yml').replace(/\.yaml$/, '.persistent.yaml')
+        : substitutedFilePath;
       if (!result.has(filePath)) result.set(filePath, []);
 
       let serviceVars: Record<string, string>;

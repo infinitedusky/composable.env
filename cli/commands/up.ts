@@ -120,8 +120,16 @@ function resolveProfile(
   return process.env.CE_PROFILE || process.env.CENV_PROFILE || config.defaultProfile;
 }
 
-function findComposeFile(cwd: string): string | null {
-  for (const name of ['docker-compose.yml', 'docker-compose.yaml']) {
+function findComposeFile(cwd: string, profile?: string): string | null {
+  // Prefer per-profile files (when target.file in contracts uses the
+  // {profile} placeholder, env:build writes docker-compose.{profile}.yml).
+  // Fall back to the unsuffixed file (single-file multi-profile shape).
+  const candidates: string[] = [];
+  if (profile) {
+    candidates.push(`docker-compose.${profile}.yml`, `docker-compose.${profile}.yaml`);
+  }
+  candidates.push('docker-compose.yml', 'docker-compose.yaml');
+  for (const name of candidates) {
     if (fs.existsSync(path.join(cwd, name))) {
       return name;
     }
@@ -281,7 +289,7 @@ export function registerUpCommand(program: Command): void {
       }
 
       // 1. Find compose file
-      const composeFile = findComposeFile(cwd);
+      const composeFile = findComposeFile(cwd, profile);
       if (!composeFile) {
         console.error(chalk.red('No docker-compose.yml found. Run ce env:build first.'));
         process.exit(1);
@@ -397,7 +405,7 @@ export function registerUpCommand(program: Command): void {
       const config = loadConfig(cwd);
       const profile = resolveProfile(options.profile, positional, cwd, config);
 
-      const composeFile = findComposeFile(cwd);
+      const composeFile = findComposeFile(cwd, profile);
       if (!composeFile) {
         console.error(chalk.red('No docker-compose.yml found.'));
         process.exit(1);
@@ -437,7 +445,7 @@ export function registerUpCommand(program: Command): void {
       const config = loadConfig(cwd);
       const profile = resolveProfile(options.profile, positional, cwd, config);
 
-      const composeFile = findComposeFile(cwd);
+      const composeFile = findComposeFile(cwd, profile);
       if (!composeFile) {
         console.error(chalk.red('No docker-compose.yml found.'));
         process.exit(1);
@@ -469,7 +477,7 @@ export function registerUpCommand(program: Command): void {
       const config = loadConfig(cwd);
       const profile = resolveProfile(options.profile, positional, cwd, config);
 
-      const composeFile = findComposeFile(cwd);
+      const composeFile = findComposeFile(cwd, profile);
       if (!composeFile) {
         console.error(chalk.red('No docker-compose.yml found.'));
         process.exit(1);

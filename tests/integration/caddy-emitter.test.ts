@@ -461,6 +461,95 @@ describe('Caddy emitter (integration)', () => {
     expect(compose).toContain('profiles:\n      - test');
   });
 
+  describe('per-profile compose files ({profile} placeholder in target.file)', () => {
+    it('writes one compose file per profile when target.file uses {profile}', async () => {
+      writeCeConfig(tmpDir, {
+        envDir: 'env',
+        defaultProfile: 'local',
+        profiles: {
+          local: { suffix: '', domain: 'numero.local' },
+          test:  { suffix: '', domain: 'numero.test' },
+        },
+      });
+      writeProfile(tmpDir, 'local', { name: 'local', description: 'Local' });
+      writeProfile(tmpDir, 'test',  { name: 'test',  description: 'Test' });
+      writeComponent(tmpDir, 'admin', { default: {} });
+      writeContract(tmpDir, 'admin', {
+        name: 'admin',
+        target: {
+          type: 'docker-compose',
+          file: path.join(tmpDir, 'docker-compose.{profile}.yml'),
+          service: 'admin',
+          config: { image: 'nginx:alpine', ports: ['3664:3664'] },
+        },
+        vars: {},
+      });
+
+      const builder = new EnvironmentBuilder(tmpDir, '', 'local');
+      await builder.initialize();
+      const result = await builder.buildAllProfiles(undefined, { local: '', test: '' }, {
+        local: { suffix: '', domain: 'numero.local' },
+        test:  { suffix: '', domain: 'numero.test' },
+      });
+      expect(result.success).toBe(true);
+
+      // Two separate compose files exist
+      expect(fs.existsSync(path.join(tmpDir, 'docker-compose.local.yml'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'docker-compose.test.yml'))).toBe(true);
+
+      const localContent = fs.readFileSync(path.join(tmpDir, 'docker-compose.local.yml'), 'utf8');
+      const testContent = fs.readFileSync(path.join(tmpDir, 'docker-compose.test.yml'), 'utf8');
+
+      // Each file has the service with the SAME unsuffixed name — no collision
+      // because they're in different files
+      expect(localContent).toContain('admin:');
+      expect(testContent).toContain('admin:');
+      // No `profiles:` array in per-profile files (file selects the profile)
+      expect(localContent).not.toMatch(/profiles:\n\s+-\s+local/);
+      expect(testContent).not.toMatch(/profiles:\n\s+-\s+test/);
+    });
+
+    it('per-profile files allow identical empty suffixes across profiles (no collision)', async () => {
+      // The motivating bug: three profiles with suffix: "" → "Key admin already set"
+      // when emitted into one compose file. With per-profile files, each file
+      // is its own namespace and the collision goes away.
+      writeCeConfig(tmpDir, {
+        envDir: 'env',
+        defaultProfile: 'local',
+        profiles: {
+          local:      { suffix: '', domain: 'numero.local' },
+          test:       { suffix: '', domain: 'numero.test' },
+          production: { suffix: '', domain: 'chitin.casino' },
+        },
+      });
+      writeProfile(tmpDir, 'local',      { name: 'local',      description: 'Local' });
+      writeProfile(tmpDir, 'test',       { name: 'test',       description: 'Test' });
+      writeProfile(tmpDir, 'production', { name: 'production', description: 'Prod' });
+      writeComponent(tmpDir, 'admin', { default: {} });
+      writeContract(tmpDir, 'admin', {
+        name: 'admin',
+        target: {
+          type: 'docker-compose',
+          file: path.join(tmpDir, 'docker-compose.{profile}.yml'),
+          service: 'admin',
+          config: { image: 'nginx:alpine', ports: ['3664:3664'] },
+        },
+        vars: {},
+      });
+
+      const builder = new EnvironmentBuilder(tmpDir, '', 'test');
+      await builder.initialize();
+      const result = await builder.buildFromProfile('test');
+      if (!result.success) console.error('BUILD ERRORS:', result.errors);
+      expect(result.success).toBe(true);
+
+      // All three files created from a single env:build test call (multi-profile fanout)
+      expect(fs.existsSync(path.join(tmpDir, 'docker-compose.local.yml'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'docker-compose.test.yml'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'docker-compose.production.yml'))).toBe(true);
+    });
+  });
+
   it('auto-gitignores the generated Caddyfile', async () => {
     writeCeConfig(tmpDir, {
       envDir: 'env',
